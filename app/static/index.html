@@ -16,8 +16,31 @@
     main { display: grid; grid-template-columns: minmax(360px, 430px) 1fr; gap: 16px; padding: 16px; }
     .panel, .viewer { background: white; border: 1px solid #d9e2ec; border-radius: 12px; box-shadow: 0 1px 4px rgba(15,23,42,.05); }
     .panel { padding: 16px; max-height: calc(100vh - 118px); overflow: auto; }
-    .viewer { overflow: hidden; min-height: 720px; display: grid; grid-template-rows: 420px 1fr; }
-    #map { height: 420px; width: 100%; }
+    .viewer { --map-pane-height: 420px; overflow: hidden; min-height: 720px; display: grid; grid-template-rows: var(--map-pane-height) 10px minmax(300px, 1fr); }
+    #map { height: 100%; width: 100%; }
+    .viewer-resizer {
+      height: 10px;
+      cursor: row-resize;
+      background: linear-gradient(#f8fafc, #e2e8f0);
+      border-top: 1px solid #d9e2ec;
+      border-bottom: 1px solid #d9e2ec;
+      position: relative;
+      z-index: 3;
+      touch-action: none;
+    }
+    .viewer-resizer::before {
+      content: "";
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 56px;
+      height: 3px;
+      border-radius: 999px;
+      background: #94a3b8;
+      transform: translate(-50%, -50%);
+    }
+    .viewer-resizer:hover,
+    .viewer-resizer.dragging { background: linear-gradient(#eff6ff, #dbeafe); }
     .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
     label { display: block; font-size: 12px; margin: 12px 0 4px; font-weight: 700; color: #344054; }
     input, textarea, select { box-sizing: border-box; width: 100%; border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 13px; }
@@ -84,8 +107,12 @@
       background: #2563eb;
       border-radius: 50%;
       box-shadow: 0 1px 5px rgba(15,23,42,.35);
+      cursor: move;
     }
-    @media (max-width: 920px) { main { grid-template-columns: 1fr; } .panel { max-height: none; } .viewer { min-height: 560px; } }
+    .bbox-move-handle.keyboard-active {
+      box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.22), 0 1px 5px rgba(15,23,42,.35);
+    }
+    @media (max-width: 920px) { main { grid-template-columns: 1fr; } .panel { max-height: none; } .viewer { min-height: 560px; --map-pane-height: 320px; } }
   </style>
 </head>
 <body>
@@ -253,6 +280,7 @@
 
   <section class="viewer">
     <div id="map"></div>
+    <div class="viewer-resizer" id="viewerResizer" role="separator" aria-orientation="horizontal" aria-label="Resize map and preview panes"></div>
     <div class="preview-shell">
       <model-viewer id="preview" camera-controls auto-rotate shadow-intensity="0.7" exposure="0.95" alt="3D preview will appear after generation"></model-viewer>
       <label class="preview-toolbar"><input id="preview_auto_rotate" type="checkbox" checked> Auto rotate</label>
@@ -270,8 +298,63 @@
   let moveMarker = null;
   let moveStart = null;
   let moveStartBounds = null;
+  let selectionKeyboardActive = false;
   const cornerIcon = L.divIcon({className: 'bbox-handle', iconSize: [14, 14]});
   const moveIcon = L.divIcon({className: 'bbox-move-handle', iconSize: [18, 18]});
+
+  const viewer = document.querySelector('.viewer');
+  const viewerResizer = document.getElementById('viewerResizer');
+  const MAP_PANE_STORAGE_KEY = 'topotile.mapPaneRatio';
+
+  function clamp(value, min, max) {
+    return Math.max(min, Math.min(max, value));
+  }
+
+  function setMapPaneHeight(heightPx, persist = true) {
+    if (!viewer || !viewerResizer) return;
+    const available = viewer.clientHeight - viewerResizer.offsetHeight;
+    const minMap = Math.min(320, Math.max(180, available * 0.25));
+    const minPreview = Math.min(320, Math.max(240, available * 0.25));
+    const maxMap = Math.max(minMap, available - minPreview);
+    const nextHeight = clamp(heightPx, minMap, maxMap);
+    viewer.style.setProperty('--map-pane-height', `${nextHeight}px`);
+    if (persist && available > 0) {
+      localStorage.setItem(MAP_PANE_STORAGE_KEY, String(nextHeight / available));
+    }
+    window.requestAnimationFrame(() => map.invalidateSize());
+  }
+
+  function restoreMapPaneHeight() {
+    if (!viewer || !viewerResizer) return;
+    const available = viewer.clientHeight - viewerResizer.offsetHeight;
+    const savedRatio = parseFloat(localStorage.getItem(MAP_PANE_STORAGE_KEY) || '');
+    if (Number.isFinite(savedRatio) && savedRatio > 0 && savedRatio < 1) {
+      setMapPaneHeight(available * savedRatio, false);
+    } else {
+      setMapPaneHeight(Math.min(420, available * 0.55), false);
+    }
+  }
+
+  function startViewerResize(event) {
+    if (!viewer || !viewerResizer) return;
+    event.preventDefault();
+    viewerResizer.classList.add('dragging');
+    const onMove = moveEvent => {
+      const rect = viewer.getBoundingClientRect();
+      setMapPaneHeight(moveEvent.clientY - rect.top);
+    };
+    const onUp = () => {
+      viewerResizer.classList.remove('dragging');
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }
+
+  viewerResizer.addEventListener('mousedown', startViewerResize);
+  window.addEventListener('resize', restoreMapPaneHeight);
+  restoreMapPaneHeight();
 
   function selectionMode() {
     const selected = document.querySelector('input[name="selection_mode"]:checked');
@@ -499,6 +582,57 @@
     updateHandles(false);
   }
 
+  function isTypingTarget(target) {
+    const tagName = target && target.tagName ? target.tagName.toLowerCase() : '';
+    return ['input', 'textarea', 'select', 'button'].includes(tagName) || Boolean(target && target.isContentEditable);
+  }
+
+  function setSelectionKeyboardActive(active) {
+    selectionKeyboardActive = Boolean(active);
+    const markerEl = moveMarker && moveMarker.getElement ? moveMarker.getElement() : null;
+    if (markerEl) markerEl.classList.toggle('keyboard-active', selectionKeyboardActive);
+  }
+
+  function nudgeSelectionByPixels(dx, dy) {
+    const bounds = currentSelectionBounds();
+    const center = bounds.getCenter();
+    const centerPoint = map.latLngToLayerPoint(center);
+    const target = map.layerPointToLatLng(L.point(centerPoint.x + dx, centerPoint.y + dy));
+    const dLat = target.lat - center.lat;
+    const dLng = target.lng - center.lng;
+    const moved = L.latLngBounds(
+      [bounds.getSouth() + dLat, bounds.getWest() + dLng],
+      [bounds.getNorth() + dLat, bounds.getEast() + dLng]
+    );
+    updateRectFromBounds(moved);
+    updateHandles(true);
+  }
+
+  document.addEventListener('keydown', event => {
+    if (!selectionKeyboardActive || isTypingTarget(event.target)) return;
+    const step = event.shiftKey ? 15 : 3;
+    const moves = {
+      ArrowUp: [0, -step],
+      ArrowDown: [0, step],
+      ArrowLeft: [-step, 0],
+      ArrowRight: [step, 0],
+    };
+    const move = moves[event.key];
+    if (!move) return;
+    event.preventDefault();
+    nudgeSelectionByPixels(move[0], move[1]);
+  });
+
+  map.on('mousemove', event => {
+    if (!selectionKeyboardActive || !moveMarker) return;
+    const centerPoint = map.latLngToContainerPoint(moveMarker.getLatLng());
+    if (centerPoint.distanceTo(event.containerPoint) > 34) {
+      setSelectionKeyboardActive(false);
+    }
+  });
+  map.on('mouseout', () => setSelectionKeyboardActive(false));
+  window.addEventListener('blur', () => setSelectionKeyboardActive(false));
+
   function boundsWithDraggedCorner(name, latlng) {
     const b = currentSelectionBounds();
     const box = boundsToBBox(b);
@@ -533,7 +667,9 @@
     const center = bounds.getCenter();
     if (!moveMarker) {
       moveMarker = L.marker(center, {draggable: true, icon: moveIcon, title: 'Drag to move selection'}).addTo(map);
+      moveMarker.on('mouseover', () => setSelectionKeyboardActive(true));
       moveMarker.on('dragstart', event => {
+        setSelectionKeyboardActive(true);
         moveStart = event.target.getLatLng();
         moveStartBounds = currentSelectionBounds();
       });
@@ -551,10 +687,12 @@
       moveMarker.on('dragend', () => {
         moveStart = null;
         moveStartBounds = null;
+        setSelectionKeyboardActive(true);
         updateHandles(true);
       });
     } else if (resetPositions) {
       moveMarker.setLatLng(center);
+      if (selectionKeyboardActive) setSelectionKeyboardActive(true);
     }
   }
 

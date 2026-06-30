@@ -6,6 +6,13 @@ Time zone: local macOS time. Some early entries are reconstructed from request o
 
 ## 2026-06-30
 
+### 13:17 - Adjustable Map Preview Layout and Keyboard Selection Nudging
+
+- Added a draggable horizontal divider between the map and 3D preview panes so their vertical ratio can be adjusted with the mouse.
+- The adjusted map/preview split is saved in local browser storage and restored on reload.
+- Added keyboard nudging for the map selection: hover the blue center handle, then use arrow keys to move the whole selection by small screen-pixel steps.
+- Direction-key nudging ignores form inputs so numeric fields and text boxes keep their normal keyboard behavior.
+
 ### 12:21 - Windows One-Click Launcher
 
 - Added `Open_TopoTile_Studio_Windows_Start.bat` as a Windows-specific double-click launcher.
