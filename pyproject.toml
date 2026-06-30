@@ -1,0 +1,8 @@
+[project]
+name = "topotile-studio"
+version = "0.1.0"
+description = "Local OSM and DEM city tile generator for 3MF printing"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

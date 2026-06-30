@@ -1,0 +1,13 @@
+.DS_Store
+.pytest_cache/
+.venv/
+__pycache__/
+*.pyc
+data/server.log
+data/server.pid
+data/cache/*
+data/jobs/*
+data/outputs/*
+!data/cache/.gitkeep
+!data/jobs/.gitkeep
+!data/outputs/.gitkeep
