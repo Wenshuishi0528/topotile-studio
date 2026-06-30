@@ -35,11 +35,11 @@ def test_model_params_airport_layer_defaults_on():
     assert params.include_airport is True
 
 
-def test_model_params_area_infill_defaults_on_with_04mm_height():
+def test_model_params_area_infill_defaults_on_with_06mm_height():
     params = ModelParams.from_dict({"bbox": [47.62, -122.355, 47.626, -122.3455]})
 
     assert params.include_area_infill is True
-    assert params.area_infill_height_mm == 0.40
+    assert params.area_infill_height_mm == 0.60
     assert params.area_infill_mode == "empty_areas"
 
 

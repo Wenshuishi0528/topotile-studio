@@ -29,6 +29,10 @@ COLORS = {
     "area_infill": (176, 164, 138, 255),
 }
 
+MIN_PRINTABLE_HOLE_AREA_MM2 = 1e-3
+MAX_TOUCHING_HOLE_AREA_MM2 = 10.0
+HOLE_TOUCH_PRECISION_MM = 1e-6
+
 
 def _terrain_cut_mask(
     grid: TerrainGrid,
@@ -151,22 +155,53 @@ def _signed_area(coords: list[tuple[float, float]]) -> float:
     return area / 2.0
 
 
-def _add_triangle(vertices: list[tuple[float, float, float]], faces: list[tuple[int, int, int]], coords: list[tuple[float, float]], z: float, up: bool) -> None:
+VertexCache = dict[tuple[int, int, int], int]
+
+
+def _vertex_key(x: float, y: float, z: float, precision: float = 1e-6) -> tuple[int, int, int]:
+    return (
+        int(round(float(x) / precision)),
+        int(round(float(y) / precision)),
+        int(round(float(z) / precision)),
+    )
+
+
+def _vertex_id(vertices: list[tuple[float, float, float]], cache: VertexCache, x: float, y: float, z: float) -> int:
+    key = _vertex_key(x, y, z)
+    existing = cache.get(key)
+    if existing is not None:
+        return existing
+    idx = len(vertices)
+    vertices.append((float(x), float(y), float(z)))
+    cache[key] = idx
+    return idx
+
+
+def _add_triangle(
+    vertices: list[tuple[float, float, float]],
+    faces: list[tuple[int, int, int]],
+    cache: VertexCache,
+    coords: list[tuple[float, float]],
+    z: float,
+    up: bool,
+) -> None:
     if len(coords) < 3:
         return
     tri = coords[:3]
     area = _signed_area(tri + [tri[0]])
-    idx = len(vertices)
-    vertices.extend([(tri[0][0], tri[0][1], z), (tri[1][0], tri[1][1], z), (tri[2][0], tri[2][1], z)])
+    if abs(area) <= 1e-12:
+        return
+    idx = [_vertex_id(vertices, cache, x, y, z) for x, y in tri]
     if up:
-        faces.append((idx, idx + 1, idx + 2) if area >= 0 else (idx, idx + 2, idx + 1))
+        faces.append((idx[0], idx[1], idx[2]) if area >= 0 else (idx[0], idx[2], idx[1]))
     else:
-        faces.append((idx, idx + 2, idx + 1) if area >= 0 else (idx, idx + 1, idx + 2))
+        faces.append((idx[0], idx[2], idx[1]) if area >= 0 else (idx[0], idx[1], idx[2]))
 
 
 def _add_ring_sides(
     vertices: list[tuple[float, float, float]],
     faces: list[tuple[int, int, int]],
+    cache: VertexCache,
     ring: Iterable[tuple[float, float]],
     z0: float,
     z1: float,
@@ -180,14 +215,18 @@ def _add_ring_sides(
     for p0, p1 in zip(coords, coords[1:]):
         if p0 == p1:
             continue
-        idx = len(vertices)
-        vertices.extend([(p0[0], p0[1], z0), (p1[0], p1[1], z0), (p1[0], p1[1], z1), (p0[0], p0[1], z1)])
+        idx = (
+            _vertex_id(vertices, cache, p0[0], p0[1], z0),
+            _vertex_id(vertices, cache, p1[0], p1[1], z0),
+            _vertex_id(vertices, cache, p1[0], p1[1], z1),
+            _vertex_id(vertices, cache, p0[0], p0[1], z1),
+        )
         if not reverse:
-            faces.append((idx, idx + 1, idx + 2))
-            faces.append((idx, idx + 2, idx + 3))
+            faces.append((idx[0], idx[1], idx[2]))
+            faces.append((idx[0], idx[2], idx[3]))
         else:
-            faces.append((idx, idx + 2, idx + 1))
-            faces.append((idx, idx + 3, idx + 2))
+            faces.append((idx[0], idx[2], idx[1]))
+            faces.append((idx[0], idx[3], idx[2]))
 
 
 def _triangulate_polygon(poly: Polygon) -> list[Polygon]:
@@ -217,7 +256,66 @@ def _clean_polygon(poly: Polygon, min_area: float = 1e-6) -> Polygon | None:
         poly = max(poly.geoms, key=lambda g: g.area)
     if not isinstance(poly, Polygon) or poly.area <= min_area:
         return None
+    poly = _drop_tiny_holes(poly)
     return poly
+
+
+def _ring_point_keys(ring: Iterable[tuple[float, float]], precision: float = HOLE_TOUCH_PRECISION_MM) -> set[tuple[int, int]]:
+    keys: set[tuple[int, int]] = set()
+    coords = list(ring)
+    points = coords[:-1] if len(coords) > 1 and coords[0] == coords[-1] else coords
+    for x, y in points:
+        keys.add((int(round(float(x) / precision)), int(round(float(y) / precision))))
+    return keys
+
+
+def _drop_tiny_holes(
+    poly: Polygon,
+    min_hole_area: float = MIN_PRINTABLE_HOLE_AREA_MM2,
+    max_touching_hole_area: float = MAX_TOUCHING_HOLE_AREA_MM2,
+) -> Polygon:
+    if not poly.interiors:
+        return poly
+    exterior_keys = _ring_point_keys(poly.exterior.coords)
+    hole_keys = [_ring_point_keys(ring.coords) for ring in poly.interiors]
+    holes: list[list[tuple[float, float]]] = []
+    changed = False
+    for index, ring in enumerate(poly.interiors):
+        try:
+            hole_area = abs(Polygon(ring).area)
+        except Exception:
+            changed = True
+            continue
+        touches_other_boundary = bool(hole_keys[index] & exterior_keys)
+        if not touches_other_boundary and hole_area <= max_touching_hole_area:
+            touches_other_boundary = any(
+                bool(hole_keys[index] & other_keys)
+                for other_index, other_keys in enumerate(hole_keys)
+                if other_index != index
+            )
+        if hole_area <= min_hole_area:
+            changed = True
+            continue
+        if touches_other_boundary and hole_area <= max_touching_hole_area:
+            changed = True
+            continue
+        holes.append([(float(x), float(y)) for x, y in ring.coords])
+    if not changed:
+        return poly
+    try:
+        cleaned = Polygon([(float(x), float(y)) for x, y in poly.exterior.coords], holes)
+    except Exception:
+        return poly
+    if cleaned.is_empty:
+        return poly
+    if not cleaned.is_valid:
+        valid = make_valid(cleaned)
+        if isinstance(valid, MultiPolygon):
+            valid = max(valid.geoms, key=lambda g: g.area)
+        if isinstance(valid, Polygon) and not valid.is_empty:
+            return valid
+        return poly
+    return cleaned
 
 
 def extrude_polygon(poly: Polygon, z0: float, z1: float, name: str, color: tuple[int, int, int, int]) -> MeshPart:
@@ -227,15 +325,16 @@ def extrude_polygon(poly: Polygon, z0: float, z1: float, name: str, color: tuple
 
     vertices: list[tuple[float, float, float]] = []
     faces: list[tuple[int, int, int]] = []
+    cache: VertexCache = {}
 
     for tri in _triangulate_polygon(poly):
         coords = [(float(x), float(y)) for x, y in list(tri.exterior.coords)[:3]]
-        _add_triangle(vertices, faces, coords, z1, up=True)
-        _add_triangle(vertices, faces, coords, z0, up=False)
+        _add_triangle(vertices, faces, cache, coords, z1, up=True)
+        _add_triangle(vertices, faces, cache, coords, z0, up=False)
 
-    _add_ring_sides(vertices, faces, [(float(x), float(y)) for x, y in poly.exterior.coords], z0, z1, reverse=False)
+    _add_ring_sides(vertices, faces, cache, [(float(x), float(y)) for x, y in poly.exterior.coords], z0, z1, reverse=False)
     for interior in poly.interiors:
-        _add_ring_sides(vertices, faces, [(float(x), float(y)) for x, y in interior.coords], z0, z1, reverse=True)
+        _add_ring_sides(vertices, faces, cache, [(float(x), float(y)) for x, y in interior.coords], z0, z1, reverse=True)
 
     if not faces:
         return MeshPart(name, np.zeros((0, 3)), np.zeros((0, 3), dtype=np.int64), color)
@@ -322,6 +421,9 @@ def _terrain_points_inside_polygon(poly: Polygon, terrain: TerrainGrid, max_poin
 def _add_terrain_triangle(
     vertices: list[tuple[float, float, float]],
     faces: list[tuple[int, int, int]],
+    cache: VertexCache,
+    top_faces: list[tuple[int, int, int]],
+    top_to_bottom: dict[int, int],
     coords: list[tuple[float, float]],
     terrain: TerrainGrid,
     z_offset_mm: float,
@@ -335,20 +437,26 @@ def _add_terrain_triangle(
         return
     bottom = [terrain.sample_z(x, y) + z_offset_mm for x, y in tri]
     top = [z + thickness_mm for z in bottom]
-    idx = len(vertices)
-    vertices.extend([(x, y, z) for (x, y), z in zip(tri, top)])
-    vertices.extend([(x, y, z) for (x, y), z in zip(tri, bottom)])
+    top_idx = [_vertex_id(vertices, cache, x, y, z) for (x, y), z in zip(tri, top)]
+    bottom_idx = [_vertex_id(vertices, cache, x, y, z) for (x, y), z in zip(tri, bottom)]
+    for top_vertex, bottom_vertex in zip(top_idx, bottom_idx):
+        top_to_bottom[top_vertex] = bottom_vertex
     if area >= 0:
-        faces.append((idx, idx + 1, idx + 2))
-        faces.append((idx + 3, idx + 5, idx + 4))
+        top_face = (top_idx[0], top_idx[1], top_idx[2])
+        faces.append(top_face)
+        top_faces.append(top_face)
+        faces.append((bottom_idx[0], bottom_idx[2], bottom_idx[1]))
     else:
-        faces.append((idx, idx + 2, idx + 1))
-        faces.append((idx + 3, idx + 4, idx + 5))
+        top_face = (top_idx[0], top_idx[2], top_idx[1])
+        faces.append(top_face)
+        top_faces.append(top_face)
+        faces.append((bottom_idx[0], bottom_idx[1], bottom_idx[2]))
 
 
 def _add_terrain_ring_sides(
     vertices: list[tuple[float, float, float]],
     faces: list[tuple[int, int, int]],
+    cache: VertexCache,
     ring: Iterable[tuple[float, float]],
     terrain: TerrainGrid,
     z_offset_mm: float,
@@ -365,19 +473,41 @@ def _add_terrain_ring_sides(
             continue
         b0 = terrain.sample_z(p0[0], p0[1]) + z_offset_mm
         b1 = terrain.sample_z(p1[0], p1[1]) + z_offset_mm
-        idx = len(vertices)
-        vertices.extend([
-            (p0[0], p0[1], b0),
-            (p1[0], p1[1], b1),
-            (p1[0], p1[1], b1 + thickness_mm),
-            (p0[0], p0[1], b0 + thickness_mm),
-        ])
+        idx = (
+            _vertex_id(vertices, cache, p0[0], p0[1], b0),
+            _vertex_id(vertices, cache, p1[0], p1[1], b1),
+            _vertex_id(vertices, cache, p1[0], p1[1], b1 + thickness_mm),
+            _vertex_id(vertices, cache, p0[0], p0[1], b0 + thickness_mm),
+        )
         if not reverse:
-            faces.append((idx, idx + 1, idx + 2))
-            faces.append((idx, idx + 2, idx + 3))
+            faces.append((idx[0], idx[1], idx[2]))
+            faces.append((idx[0], idx[2], idx[3]))
         else:
-            faces.append((idx, idx + 2, idx + 1))
-            faces.append((idx, idx + 3, idx + 2))
+            faces.append((idx[0], idx[2], idx[1]))
+            faces.append((idx[0], idx[3], idx[2]))
+
+
+def _add_boundary_sides_from_top_faces(
+    faces: list[tuple[int, int, int]],
+    top_faces: list[tuple[int, int, int]],
+    top_to_bottom: dict[int, int],
+) -> None:
+    edge_uses: dict[tuple[int, int], list[tuple[int, int]]] = {}
+    for a, b, c in top_faces:
+        for edge in ((a, b), (b, c), (c, a)):
+            key = tuple(sorted(edge))
+            edge_uses.setdefault(key, []).append(edge)
+
+    for uses in edge_uses.values():
+        if len(uses) != 1:
+            continue
+        a, b = uses[0]
+        bottom_a = top_to_bottom.get(a)
+        bottom_b = top_to_bottom.get(b)
+        if bottom_a is None or bottom_b is None or bottom_a == bottom_b:
+            continue
+        faces.append((a, b, bottom_b))
+        faces.append((a, bottom_b, bottom_a))
 
 
 def extrude_polygon_on_terrain(
@@ -421,6 +551,9 @@ def extrude_polygon_on_terrain(
 
     vertices: list[tuple[float, float, float]] = []
     faces: list[tuple[int, int, int]] = []
+    cache: VertexCache = {}
+    top_faces: list[tuple[int, int, int]] = []
+    top_to_bottom: dict[int, int] = {}
     for candidate in candidates:
         if candidate.is_empty or candidate.area <= 1e-9:
             continue
@@ -431,11 +564,9 @@ def extrude_polygon_on_terrain(
         for piece in iter_polygons(clipped):
             for tri in _triangulate_polygon(piece):
                 coords = [(float(x), float(y)) for x, y in list(tri.exterior.coords)[:3]]
-                _add_terrain_triangle(vertices, faces, coords, terrain, z_offset_mm, thickness_mm)
+                _add_terrain_triangle(vertices, faces, cache, top_faces, top_to_bottom, coords, terrain, z_offset_mm, thickness_mm)
 
-    _add_terrain_ring_sides(vertices, faces, exterior, terrain, z_offset_mm, thickness_mm, reverse=False)
-    for hole in holes:
-        _add_terrain_ring_sides(vertices, faces, hole, terrain, z_offset_mm, thickness_mm, reverse=True)
+    _add_boundary_sides_from_top_faces(faces, top_faces, top_to_bottom)
 
     if not faces:
         return MeshPart(name, np.zeros((0, 3)), np.zeros((0, 3), dtype=np.int64), color)
@@ -485,6 +616,7 @@ def transform_polygon_to_mm(poly_m: Polygon, scaler: ModelScaler, simplify_toler
         poly = max(poly.geoms, key=lambda p: p.area)
     if not isinstance(poly, Polygon) or poly.is_empty or poly.area < 1e-5:
         return None
+    poly = _drop_tiny_holes(poly)
     return poly
 
 

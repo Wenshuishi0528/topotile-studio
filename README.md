@@ -73,7 +73,14 @@ On macOS, you can double-click:
 Open_OSM_DEM_3MF_Modeler.command
 ```
 
+On Windows, you can double-click:
+
+```text
+Open_TopoTile_Studio_Windows_Start.bat
+```
+
 The launcher checks dependencies, starts the local server, and opens the browser.
+The Windows launcher creates `.venv`, installs dependencies if needed, starts the server in a separate Command Prompt window, and opens `http://127.0.0.1:8000/`.
 
 You can also run it manually:
 

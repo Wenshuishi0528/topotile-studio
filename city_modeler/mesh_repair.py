@@ -62,31 +62,71 @@ def repair_mesh_part(part: MeshPart) -> tuple[MeshPart, dict[str, Any]]:
         mesh.update_faces(unique)
         mesh.remove_unreferenced_vertices()
 
-    if len(mesh.vertices) and len(mesh.faces):
-        mesh.merge_vertices(digits_vertex=5)
-        mesh.remove_unreferenced_vertices()
-        trimesh.repair.fix_winding(mesh)
-        trimesh.repair.fix_normals(mesh, multibody=True)
-        trimesh.repair.fix_inversion(mesh, multibody=True)
-        filled_holes = bool(trimesh.repair.fill_holes(mesh))
-        if len(mesh.faces):
-            unique = mesh.unique_faces()
-            duplicate_removed += int(len(mesh.faces) - int(np.count_nonzero(unique)))
-            mesh.update_faces(unique)
-        mesh.remove_unreferenced_vertices()
-    else:
-        filled_holes = False
+    candidates: list[tuple[MeshPart, dict[str, Any], dict[str, Any]]] = []
 
-    repaired = MeshPart(part.name, np.asarray(mesh.vertices, dtype=float), np.asarray(mesh.faces, dtype=np.int64), part.color).cleaned()
-    after = mesh_diagnostics(repaired)
+    if len(mesh.vertices) and len(mesh.faces):
+        merge_options = [False]
+        if before["boundary_edges"] > 0:
+            merge_options.append(True)
+        for merge_vertices in merge_options:
+            fan_options = [False]
+            if before["boundary_edges"] > 0:
+                fan_options.append(True)
+            for use_fan in fan_options:
+                candidate = mesh.copy()
+                candidate_duplicate_removed = duplicate_removed
+                if merge_vertices:
+                    candidate.merge_vertices(digits_vertex=5)
+                    candidate.remove_unreferenced_vertices()
+                trimesh.repair.fix_winding(candidate)
+                trimesh.repair.fix_normals(candidate, multibody=True)
+                trimesh.repair.fix_inversion(candidate, multibody=True)
+                filled_holes = bool(trimesh.repair.fill_holes(candidate, use_fan=use_fan))
+                if len(candidate.faces):
+                    unique = candidate.unique_faces()
+                    candidate_duplicate_removed += int(len(candidate.faces) - int(np.count_nonzero(unique)))
+                    candidate.update_faces(unique)
+                candidate.remove_unreferenced_vertices()
+                candidate_part = MeshPart(
+                    part.name,
+                    np.asarray(candidate.vertices, dtype=float),
+                    np.asarray(candidate.faces, dtype=np.int64),
+                    part.color,
+                ).cleaned()
+                diagnostics = mesh_diagnostics(candidate_part)
+                fixed = {
+                    "degenerate_faces_removed": degenerate_removed,
+                    "duplicate_faces_removed": candidate_duplicate_removed,
+                    "filled_simple_holes": filled_holes,
+                    "fan_hole_fill": use_fan,
+                    "merged_vertices": merge_vertices,
+                }
+                candidates.append((candidate_part, diagnostics, fixed))
+    else:
+        empty_part = MeshPart(part.name, np.asarray(mesh.vertices, dtype=float), np.asarray(mesh.faces, dtype=np.int64), part.color).cleaned()
+        candidates.append((empty_part, mesh_diagnostics(empty_part), {
+            "degenerate_faces_removed": degenerate_removed,
+            "duplicate_faces_removed": duplicate_removed,
+            "filled_simple_holes": False,
+            "fan_hole_fill": False,
+            "merged_vertices": False,
+        }))
+
+    repaired, after, fixed = min(
+        candidates,
+        key=lambda item: (
+            int(item[1]["non_manifold_edges"]),
+            int(item[1]["overused_edges"]),
+            int(item[1]["boundary_edges"]),
+            0 if item[1]["watertight"] else 1,
+        ),
+    )
     report = {
         "name": part.name,
         "before": before,
         "after": after,
         "fixed": {
-            "degenerate_faces_removed": degenerate_removed,
-            "duplicate_faces_removed": duplicate_removed,
-            "filled_simple_holes": filled_holes,
+            **fixed,
             "vertices_delta": int(after["vertices"] - before["vertices"]),
             "triangles_delta": int(after["triangles"] - before["triangles"]),
             "non_manifold_edges_delta": int(after["non_manifold_edges"] - before["non_manifold_edges"]),

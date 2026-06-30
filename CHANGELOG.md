@@ -6,6 +6,29 @@ Time zone: local macOS time. Some early entries are reconstructed from request o
 
 ## 2026-06-30
 
+### 12:21 - Windows One-Click Launcher
+
+- Added `Open_TopoTile_Studio_Windows_Start.bat` as a Windows-specific double-click launcher.
+- The Windows launcher creates `.venv`, installs missing dependencies, starts TopoTile Studio on `127.0.0.1:8000`, and opens the browser automatically.
+- Updated the README run instructions to list both the macOS launcher and the Windows launcher.
+
+### 09:53 - Non-Manifold Repair Hardening
+
+- Created a local pre-change backup at `/Users/apple/Documents/Codex/2026-06-30/topotile_studio_backup_20260630-093242`.
+- Changed polygon extrusion to reuse vertices inside each individual solid so buildings, water, green, parking, airport, and area infill blocks are generated closed before repair.
+- Changed automatic repair to evaluate multiple candidates and avoid accepting vertex merges that create more non-manifold or overused edges.
+- Added optional fan hole filling as a repair candidate for terrain-following surfaces.
+- Changed terrain-following surface extrusion to build side walls from the actual triangulated top-surface boundary, preventing side walls from drifting away from terrain triangle boundaries.
+- Filtered unprintable tiny or point-touching holes that can create overused vertical edges in water and green layers.
+- Verified prior problematic cached projects offline: `奥体1`, `南通天虹花园`, and terrain-mode `西山红色之旅3` now report `0` remaining non-manifold edges after generation.
+- Added regression coverage for closed extrusion, adjacent solids, and unprintable touching holes.
+
+### 09:21 - Area Infill and Cache Cleanup Defaults
+
+- Changed the default `Area infill height, mm` from `0.40 mm` to `0.60 mm`.
+- Set `Include OSM cache`, `Include elevation cache`, and `Include terrain cache` to checked by default in the Maintenance section.
+- Updated parameter regression coverage for the new area infill height default.
+
 ### 08:50 - OSM and Elevation Data Cache
 
 - Added shared OSM Overpass response caching under `data/cache/osm/`.

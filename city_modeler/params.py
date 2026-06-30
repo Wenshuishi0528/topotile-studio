@@ -66,7 +66,7 @@ class ModelParams:
     footway_width_mm: float = 0.60
     pedestrian_width_mm: float = 0.60
     bridge_clearance_mm: float = 2.5
-    area_infill_height_mm: float = 0.40
+    area_infill_height_mm: float = 0.60
     terrain_grid_size: int = 96
     max_terrain_height_mm: float = 35.0
     simplify_tolerance_mm: float = 0.15
