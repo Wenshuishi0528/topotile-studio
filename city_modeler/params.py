@@ -78,6 +78,7 @@ class ModelParams:
     chunk_export: bool = False
     chunk_rows: int = 1
     chunk_cols: int = 1
+    auto_repair_mesh: bool = True
 
     include_buildings: bool = True
     include_roads: bool = True
@@ -120,8 +121,8 @@ class ModelParams:
         }
         int_fields = {"terrain_grid_size", "terrain_tile_zoom", "road_cleaning_level", "chunk_rows", "chunk_cols"}
         bool_fields = {
-            "auto_terrain", "large_map_mode", "cut_out_water", "chunk_export", "include_buildings", "include_roads",
-            "include_water", "include_green", "include_parking", "include_airport"
+            "auto_terrain", "large_map_mode", "cut_out_water", "chunk_export", "auto_repair_mesh",
+            "include_buildings", "include_roads", "include_water", "include_green", "include_parking", "include_airport"
         }
 
         for key in numeric_fields & filtered.keys():

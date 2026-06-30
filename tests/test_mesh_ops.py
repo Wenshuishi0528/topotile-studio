@@ -78,6 +78,47 @@ def test_airport_layer_uses_parking_thickness_for_runway_lines():
     assert math.isclose(float(airport.vertices[:, 2].max()), 3.26, abs_tol=1e-6)
 
 
+def test_green_surface_follows_terrain_relief():
+    params = ModelParams(south=0.0, west=0.0, north=0.01, east=0.01)
+    scaler = ModelScaler(scale_mm_per_m=1.0, width_mm=40.0, height_mm=40.0)
+    xs = np.tile(np.linspace(0.0, 40.0, 5), (5, 1))
+    ys = np.tile(np.linspace(0.0, 40.0, 5).reshape(5, 1), (1, 5))
+    terrain = TerrainGrid(x_mm=xs, y_mm=ys, z_mm=3.0 + ys * 0.2)
+    green_feature = OSMFeature(
+        layer="green",
+        geometry_m=Polygon([(5.0, 5.0), (35.0, 5.0), (35.0, 35.0), (5.0, 35.0)]),
+        tags={"landuse": "grass"},
+        osm_id="way/green-slope",
+    )
+
+    parts = build_surface_layer_meshes([], [], [green_feature], [], [], scaler, terrain, params)
+    green = next(part for part in parts if part.name == "green")
+
+    assert not green.is_empty()
+    assert float(np.ptp(green.vertices[:, 2])) > 5.5
+
+
+def test_road_line_densifies_over_terrain_peak():
+    params = ModelParams(south=0.0, west=0.0, north=0.01, east=0.01, min_road_width_mm=0.1)
+    scaler = ModelScaler(scale_mm_per_m=1.0, width_mm=40.0, height_mm=40.0)
+    terrain = TerrainGrid(
+        x_mm=np.asarray([[0.0, 20.0, 40.0], [0.0, 20.0, 40.0], [0.0, 20.0, 40.0]]),
+        y_mm=np.asarray([[0.0, 0.0, 0.0], [20.0, 20.0, 20.0], [40.0, 40.0, 40.0]]),
+        z_mm=np.asarray([[3.0, 3.0, 3.0], [3.0, 12.0, 3.0], [3.0, 3.0, 3.0]]),
+    )
+    road = OSMFeature(
+        layer="road",
+        geometry_m=LineString([(2.0, 20.0), (38.0, 20.0)]),
+        tags={"highway": "residential", "width": "2 m"},
+        osm_id="way/terrain-peak",
+    )
+
+    mesh = build_road_meshes([road], scaler, terrain, params)
+
+    assert not mesh.is_empty()
+    assert float(mesh.vertices[:, 2].max()) > 10.0
+
+
 def test_concave_surface_extrusion_does_not_fill_outside_notch():
     poly = Polygon([(0, 0), (5, 0), (5, 2), (2, 2), (2, 5), (0, 5), (0, 0)])
 

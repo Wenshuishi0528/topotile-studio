@@ -5,10 +5,11 @@ import math
 import re
 import numpy as np
 
-from shapely.geometry import Polygon, MultiPolygon, LineString, MultiLineString, GeometryCollection, Point
+from shapely.geometry import Polygon, MultiPolygon, LineString, MultiLineString, GeometryCollection, Point, MultiPoint
 from shapely.geometry.base import BaseGeometry
 from shapely import constrained_delaunay_triangles
 from shapely.ops import triangulate, unary_union
+from shapely.prepared import prep
 from shapely.validation import make_valid
 
 from .dem import TerrainGrid
@@ -188,6 +189,24 @@ def _add_ring_sides(
             faces.append((idx, idx + 3, idx + 2))
 
 
+def _triangulate_polygon(poly: Polygon) -> list[Polygon]:
+    try:
+        constrained = constrained_delaunay_triangles(poly)
+        triangles = list(iter_polygons(constrained))
+    except Exception:
+        triangles = []
+    if not triangles:
+        try:
+            triangles = triangulate(poly)
+        except Exception:
+            triangles = []
+    return [
+        tri
+        for tri in triangles
+        if not tri.is_empty and tri.area > 1e-9 and poly.covers(tri.representative_point())
+    ]
+
+
 def _clean_polygon(poly: Polygon, min_area: float = 1e-6) -> Polygon | None:
     if poly.is_empty:
         return None
@@ -208,22 +227,7 @@ def extrude_polygon(poly: Polygon, z0: float, z1: float, name: str, color: tuple
     vertices: list[tuple[float, float, float]] = []
     faces: list[tuple[int, int, int]] = []
 
-    try:
-        constrained = constrained_delaunay_triangles(poly)
-        triangles = list(iter_polygons(constrained))
-    except Exception:
-        triangles = []
-    if not triangles:
-        try:
-            triangles = triangulate(poly)
-        except Exception:
-            triangles = []
-
-    for tri in triangles:
-        if tri.is_empty or tri.area <= 1e-9:
-            continue
-        if not poly.covers(tri.representative_point()):
-            continue
+    for tri in _triangulate_polygon(poly):
         coords = [(float(x), float(y)) for x, y in list(tri.exterior.coords)[:3]]
         _add_triangle(vertices, faces, coords, z1, up=True)
         _add_triangle(vertices, faces, coords, z0, up=False)
@@ -231,6 +235,206 @@ def extrude_polygon(poly: Polygon, z0: float, z1: float, name: str, color: tuple
     _add_ring_sides(vertices, faces, [(float(x), float(y)) for x, y in poly.exterior.coords], z0, z1, reverse=False)
     for interior in poly.interiors:
         _add_ring_sides(vertices, faces, [(float(x), float(y)) for x, y in interior.coords], z0, z1, reverse=True)
+
+    if not faces:
+        return MeshPart(name, np.zeros((0, 3)), np.zeros((0, 3), dtype=np.int64), color)
+    return MeshPart(name, np.asarray(vertices, dtype=float), np.asarray(faces, dtype=np.int64), color).cleaned()
+
+
+def _terrain_has_relief(terrain: TerrainGrid) -> bool:
+    return bool(float(np.nanmax(terrain.z_mm) - np.nanmin(terrain.z_mm)) > 1e-6)
+
+
+def _terrain_spacing_mm(terrain: TerrainGrid) -> float:
+    candidates: list[float] = []
+    xs = terrain.x_mm[0, :]
+    ys = terrain.y_mm[:, 0]
+    if len(xs) > 1:
+        dx = np.diff(xs)
+        dx = dx[np.isfinite(dx) & (dx > 0)]
+        if dx.size:
+            candidates.append(float(np.median(dx)))
+    if len(ys) > 1:
+        dy = np.diff(ys)
+        dy = dy[np.isfinite(dy) & (dy > 0)]
+        if dy.size:
+            candidates.append(float(np.median(dy)))
+    return max(0.5, min(candidates) if candidates else 2.0)
+
+
+def _dedupe_xy(points: Iterable[tuple[float, float]], precision: float = 1e-5) -> list[tuple[float, float]]:
+    seen: set[tuple[int, int]] = set()
+    out: list[tuple[float, float]] = []
+    for x, y in points:
+        if not math.isfinite(x) or not math.isfinite(y):
+            continue
+        key = (int(round(x / precision)), int(round(y / precision)))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append((float(x), float(y)))
+    return out
+
+
+def _densify_ring_xy(ring: Iterable[tuple[float, float]], max_step_mm: float) -> list[tuple[float, float]]:
+    coords = [(float(x), float(y)) for x, y in ring]
+    if len(coords) < 2:
+        return coords
+    if coords[0] != coords[-1]:
+        coords.append(coords[0])
+    out: list[tuple[float, float]] = []
+    for p0, p1 in zip(coords, coords[1:]):
+        if not out:
+            out.append(p0)
+        length = math.hypot(p1[0] - p0[0], p1[1] - p0[1])
+        steps = max(1, int(math.ceil(length / max(max_step_mm, 0.5))))
+        for step in range(1, steps + 1):
+            t = step / steps
+            out.append((p0[0] + (p1[0] - p0[0]) * t, p0[1] + (p1[1] - p0[1]) * t))
+    return out
+
+
+def _terrain_points_inside_polygon(poly: Polygon, terrain: TerrainGrid, max_points: int = 5000) -> list[tuple[float, float]]:
+    minx, miny, maxx, maxy = poly.bounds
+    xs = terrain.x_mm[0, :]
+    ys = terrain.y_mm[:, 0]
+    ix0 = max(0, int(np.searchsorted(xs, minx, side="left")) - 1)
+    ix1 = min(len(xs), int(np.searchsorted(xs, maxx, side="right")) + 1)
+    iy0 = max(0, int(np.searchsorted(ys, miny, side="left")) - 1)
+    iy1 = min(len(ys), int(np.searchsorted(ys, maxy, side="right")) + 1)
+    total = max(0, ix1 - ix0) * max(0, iy1 - iy0)
+    if total <= 0:
+        return []
+    stride = max(1, int(math.ceil(math.sqrt(total / max_points)))) if total > max_points else 1
+    prepared = prep(poly)
+    points: list[tuple[float, float]] = []
+    for iy in range(iy0, iy1, stride):
+        for ix in range(ix0, ix1, stride):
+            x = float(xs[ix])
+            y = float(ys[iy])
+            point = Point(x, y)
+            if prepared.contains(point) or poly.touches(point):
+                points.append((x, y))
+    return points
+
+
+def _add_terrain_triangle(
+    vertices: list[tuple[float, float, float]],
+    faces: list[tuple[int, int, int]],
+    coords: list[tuple[float, float]],
+    terrain: TerrainGrid,
+    z_offset_mm: float,
+    thickness_mm: float,
+) -> None:
+    if len(coords) < 3:
+        return
+    tri = coords[:3]
+    area = _signed_area(tri + [tri[0]])
+    if abs(area) <= 1e-12:
+        return
+    bottom = [terrain.sample_z(x, y) + z_offset_mm for x, y in tri]
+    top = [z + thickness_mm for z in bottom]
+    idx = len(vertices)
+    vertices.extend([(x, y, z) for (x, y), z in zip(tri, top)])
+    vertices.extend([(x, y, z) for (x, y), z in zip(tri, bottom)])
+    if area >= 0:
+        faces.append((idx, idx + 1, idx + 2))
+        faces.append((idx + 3, idx + 5, idx + 4))
+    else:
+        faces.append((idx, idx + 2, idx + 1))
+        faces.append((idx + 3, idx + 4, idx + 5))
+
+
+def _add_terrain_ring_sides(
+    vertices: list[tuple[float, float, float]],
+    faces: list[tuple[int, int, int]],
+    ring: Iterable[tuple[float, float]],
+    terrain: TerrainGrid,
+    z_offset_mm: float,
+    thickness_mm: float,
+    reverse: bool = False,
+) -> None:
+    coords = list(ring)
+    if len(coords) < 4:
+        return
+    if coords[0] != coords[-1]:
+        coords.append(coords[0])
+    for p0, p1 in zip(coords, coords[1:]):
+        if p0 == p1:
+            continue
+        b0 = terrain.sample_z(p0[0], p0[1]) + z_offset_mm
+        b1 = terrain.sample_z(p1[0], p1[1]) + z_offset_mm
+        idx = len(vertices)
+        vertices.extend([
+            (p0[0], p0[1], b0),
+            (p1[0], p1[1], b1),
+            (p1[0], p1[1], b1 + thickness_mm),
+            (p0[0], p0[1], b0 + thickness_mm),
+        ])
+        if not reverse:
+            faces.append((idx, idx + 1, idx + 2))
+            faces.append((idx, idx + 2, idx + 3))
+        else:
+            faces.append((idx, idx + 2, idx + 1))
+            faces.append((idx, idx + 3, idx + 2))
+
+
+def extrude_polygon_on_terrain(
+    poly: Polygon,
+    terrain: TerrainGrid,
+    z_offset_mm: float,
+    thickness_mm: float,
+    name: str,
+    color: tuple[int, int, int, int],
+) -> MeshPart:
+    poly = _clean_polygon(poly)  # type: ignore[assignment]
+    if poly is None or thickness_mm <= 0:
+        return MeshPart(name, np.zeros((0, 3)), np.zeros((0, 3), dtype=np.int64), color)
+    if not _terrain_has_relief(terrain):
+        point = poly.representative_point()
+        z0 = terrain.sample_z(point.x, point.y) + z_offset_mm
+        return extrude_polygon(poly, z0, z0 + thickness_mm, name, color)
+
+    spacing = _terrain_spacing_mm(terrain)
+    max_step = max(0.5, spacing)
+    exterior = _densify_ring_xy(poly.exterior.coords, max_step)
+    holes = [_densify_ring_xy(ring.coords, max_step) for ring in poly.interiors]
+    point_candidates: list[tuple[float, float]] = []
+    point_candidates.extend(exterior[:-1])
+    for hole in holes:
+        point_candidates.extend(hole[:-1])
+    point_candidates.extend(_terrain_points_inside_polygon(poly, terrain))
+    points = _dedupe_xy(point_candidates)
+
+    if len(points) < 3:
+        point = poly.representative_point()
+        z0 = terrain.sample_z(point.x, point.y) + z_offset_mm
+        return extrude_polygon(poly, z0, z0 + thickness_mm, name, color)
+
+    try:
+        candidates = triangulate(MultiPoint(points))
+    except Exception:
+        candidates = []
+    if not candidates:
+        candidates = _triangulate_polygon(poly)
+
+    vertices: list[tuple[float, float, float]] = []
+    faces: list[tuple[int, int, int]] = []
+    for candidate in candidates:
+        if candidate.is_empty or candidate.area <= 1e-9:
+            continue
+        try:
+            clipped = candidate.intersection(poly)
+        except Exception:
+            continue
+        for piece in iter_polygons(clipped):
+            for tri in _triangulate_polygon(piece):
+                coords = [(float(x), float(y)) for x, y in list(tri.exterior.coords)[:3]]
+                _add_terrain_triangle(vertices, faces, coords, terrain, z_offset_mm, thickness_mm)
+
+    _add_terrain_ring_sides(vertices, faces, exterior, terrain, z_offset_mm, thickness_mm, reverse=False)
+    for hole in holes:
+        _add_terrain_ring_sides(vertices, faces, hole, terrain, z_offset_mm, thickness_mm, reverse=True)
 
     if not faces:
         return MeshPart(name, np.zeros((0, 3)), np.zeros((0, 3), dtype=np.int64), color)
@@ -435,6 +639,24 @@ def _roundabout_width_mm(line_m: LineString, tags: dict[str, str], scaler: Model
     return max(0.12, width_mm)
 
 
+def _densify_line_coords_m(coords: list[tuple[float, float]], max_step_m: float) -> list[tuple[float, float]]:
+    if len(coords) < 2 or max_step_m <= 0:
+        return coords
+    out: list[tuple[float, float]] = []
+    for p0, p1 in zip(coords, coords[1:]):
+        if not out:
+            out.append((float(p0[0]), float(p0[1])))
+        length = math.hypot(float(p1[0]) - float(p0[0]), float(p1[1]) - float(p0[1]))
+        steps = max(1, int(math.ceil(length / max_step_m)))
+        for step in range(1, steps + 1):
+            t = step / steps
+            out.append((
+                float(p0[0]) + (float(p1[0]) - float(p0[0])) * t,
+                float(p0[1]) + (float(p1[1]) - float(p0[1])) * t,
+            ))
+    return out
+
+
 def _road_segment_part(
     p0: tuple[float, float],
     p1: tuple[float, float],
@@ -531,6 +753,9 @@ def build_road_meshes(
                 if not roundabout_part.is_empty():
                     parts.append(roundabout_part)
                 continue
+            if _terrain_has_relief(terrain):
+                max_step_m = scaler.length_mm_to_m(_terrain_spacing_mm(terrain) * 1.5)
+                coords_m = _densify_line_coords_m(coords_m, max(max_step_m, 2.0))
             coords_mm = [scaler.xy_to_mm(float(x), float(y)) for x, y in coords_m]
             width_mm = road_width_mm(feature.tags, scaler, params)
             for m0, m1, p0, p1 in zip(coords_m, coords_m[1:], coords_mm, coords_mm[1:]):
@@ -626,10 +851,7 @@ def make_layer_mesh(
         poly = transform_polygon_to_mm(poly_m, scaler, tol_m)
         if poly is None:
             continue
-        point = poly.representative_point()
-        z0 = terrain.sample_z(point.x, point.y) + z_offset_mm
-        z1 = z0 + thickness_mm
-        parts.append(extrude_polygon(poly, z0, z1, name, color))
+        parts.append(extrude_polygon_on_terrain(poly, terrain, z_offset_mm, thickness_mm, name, color))
     return merge_parts(name, parts, color)
 
 
@@ -646,10 +868,7 @@ def make_layer_mesh_mm(
         poly = _clean_polygon(poly)
         if poly is None:
             continue
-        point = poly.representative_point()
-        z0 = terrain.sample_z(point.x, point.y) + z_offset_mm
-        z1 = z0 + thickness_mm
-        parts.append(extrude_polygon(poly, z0, z1, name, color))
+        parts.append(extrude_polygon_on_terrain(poly, terrain, z_offset_mm, thickness_mm, name, color))
     return merge_parts(name, parts, color)
 
 

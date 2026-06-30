@@ -12,6 +12,8 @@ def test_generate_sample(tmp_path: Path):
     assert (tmp_path / "city_model.glb").exists()
     assert summary["features"]["buildings"] > 0
     assert summary["features"]["parking"] > 0
+    assert summary["mesh_repair"]["enabled"] is True
+    assert "after" in summary["mesh_repair"]["totals"]
     info = validate_3mf(tmp_path / "city_model.3mf")
     assert info["objects"] >= 2
     assert info["triangles"] > 0

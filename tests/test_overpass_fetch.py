@@ -95,6 +95,72 @@ def test_fetch_osm_json_tiled_deduplicates_elements(monkeypatch):
     assert result["tile_count"] == len(calls)
 
 
+def test_fetch_osm_json_tiled_keeps_richer_duplicate_geometry(monkeypatch):
+    calls = []
+
+    def fake_fetch(south, west, north, east, overpass_url, **kwargs):
+        calls.append((south, west, north, east))
+        geometry = [{"lat": 0.0, "lon": 0.0}] if len(calls) == 1 else [
+            {"lat": 0.0, "lon": 0.0},
+            {"lat": 0.0, "lon": 0.1},
+            {"lat": 0.1, "lon": 0.1},
+        ]
+        return {
+            "elements": [
+                {"type": "way", "id": 1, "tags": {"highway": "residential"}, "geometry": geometry},
+            ]
+        }
+
+    monkeypatch.setattr(osm, "fetch_osm_json", fake_fetch)
+    monkeypatch.setattr(osm.time, "sleep", lambda _seconds: None)
+
+    result = osm.fetch_osm_json_tiled(47.0, -122.0, 47.04, -121.96, tile_size_km=2.0)
+
+    assert len(calls) > 1
+    assert len(result["elements"]) == 1
+    assert len(result["elements"][0]["geometry"]) == 3
+
+
+def test_fetch_osm_json_tiled_subdivides_failed_tile(monkeypatch):
+    calls = []
+
+    def fake_fetch(south, west, north, east, overpass_url, **kwargs):
+        calls.append((south, west, north, east))
+        if north - south > 0.006:
+            raise osm.OverpassFetchError("tile too large")
+        return {
+            "elements": [
+                {"type": "way", "id": len(calls), "tags": {"building": "yes"}},
+            ]
+        }
+
+    monkeypatch.setattr(osm, "fetch_osm_json", fake_fetch)
+    monkeypatch.setattr(osm.time, "sleep", lambda _seconds: None)
+
+    result = osm.fetch_osm_json_tiled(47.0, -122.0, 47.01, -121.99, tile_size_km=20.0)
+
+    assert len(calls) == 6
+    assert len(result["elements"]) == 4
+    assert result["tile_errors"] == []
+
+
+def test_fetch_osm_json_tiled_raises_instead_of_partial_output(monkeypatch):
+    def fake_fetch(south, west, north, east, overpass_url, **kwargs):
+        raise osm.OverpassFetchError("rate limited")
+
+    monkeypatch.setattr(osm, "fetch_osm_json", fake_fetch)
+    monkeypatch.setattr(osm.time, "sleep", lambda _seconds: None)
+
+    try:
+        osm.fetch_osm_json_tiled(47.0, -122.0, 47.04, -121.96, tile_size_km=2.0)
+    except osm.OverpassFetchError as exc:
+        message = str(exc)
+    else:
+        raise AssertionError("Expected OverpassFetchError")
+
+    assert "generation stopped to avoid missing" in message
+
+
 def test_fetch_osm_json_raises_clear_message(monkeypatch):
     def fake_post(url, data, headers, timeout):
         return FakeResponse(429, text="rate limited")

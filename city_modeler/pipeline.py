@@ -23,6 +23,7 @@ from .mesh_ops import (
     build_surface_layer_meshes,
     water_cutout_polygons_mm,
 )
+from .mesh_repair import repair_mesh_parts
 from .mesh_types import MeshPart
 from .osm import fetch_osm_json, fetch_osm_json_tiled, parse_osm_features, save_osm_json, OSMFeature
 from .params import ModelParams, safe_output_stem
@@ -203,7 +204,7 @@ def generate_model(
     footprint_mm = footprint_polygon_mm(footprint_m, scaler)
 
     terrain_message = "Loading uploaded DEM terrain" if dem_path else (
-        "Downloading terrain tiles" if params.large_map_mode else (
+        "Downloading terrain tiles" if params.auto_terrain and params.large_map_mode else (
             "Downloading terrain elevation" if params.auto_terrain else "Creating flat terrain"
         )
     )
@@ -264,6 +265,12 @@ def generate_model(
     if not parts:
         raise RuntimeError("Generation produced no mesh parts.")
 
+    _progress(progress, "Repairing mesh geometry", 0.82)
+    parts, mesh_repair = repair_mesh_parts(parts, enabled=params.auto_repair_mesh)
+    parts = [p.cleaned() for p in parts if not p.cleaned().is_empty()]
+    if not parts:
+        raise RuntimeError("Mesh repair removed all geometry.")
+
     _progress(progress, "Writing 3MF and GLB files", 0.88)
     base_name = safe_output_stem(params.output_name)
     path_3mf = write_3mf(parts, output_dir / f"{base_name}.3mf", title=params.project_name)
@@ -312,6 +319,7 @@ def generate_model(
             {"name": p.name, "vertices": int(len(p.vertices)), "triangles": int(len(p.faces))}
             for p in parts
         ],
+        "mesh_repair": mesh_repair,
         "files": {
             "3mf": path_3mf.name,
             "glb": path_glb.name,

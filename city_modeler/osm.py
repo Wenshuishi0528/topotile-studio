@@ -20,6 +20,8 @@ FALLBACK_OVERPASS_URLS = [
     "https://overpass.private.coffee/api/interpreter",
 ]
 OVERPASS_USER_AGENT = "OSM-DEM-3MF-Modeler/0.1 (local desktop 3D-printing app)"
+TILED_FETCH_MAX_DEPTH = 2
+TILED_FETCH_ATTEMPTS = 2
 
 
 class OverpassFetchError(RuntimeError):
@@ -147,6 +149,79 @@ def _bbox_tiles(
     return tiles
 
 
+def _split_bbox(south: float, west: float, north: float, east: float) -> list[tuple[float, float, float, float]]:
+    mid_lat = (south + north) / 2.0
+    mid_lon = (west + east) / 2.0
+    return [
+        (south, west, mid_lat, mid_lon),
+        (south, mid_lon, mid_lat, east),
+        (mid_lat, west, north, mid_lon),
+        (mid_lat, mid_lon, north, east),
+    ]
+
+
+def _element_geometry_score(element: dict[str, Any]) -> int:
+    score = len(element.get("geometry") or [])
+    for member in element.get("members") or []:
+        score += len(member.get("geometry") or [])
+    if element.get("tags"):
+        score += 1
+    return score
+
+
+def _merge_best_elements(target: dict[tuple[str, str], dict[str, Any]], elements: Iterable[dict[str, Any]]) -> None:
+    for element in elements:
+        key = (str(element.get("type", "")), str(element.get("id", "")))
+        if not key[0] or not key[1]:
+            continue
+        existing = target.get(key)
+        if existing is None or _element_geometry_score(element) > _element_geometry_score(existing):
+            target[key] = element
+
+
+def _fetch_tile_recursive(
+    south: float,
+    west: float,
+    north: float,
+    east: float,
+    overpass_url: str,
+    depth: int = 0,
+) -> dict[str, Any]:
+    last_error = ""
+    for attempt in range(TILED_FETCH_ATTEMPTS):
+        try:
+            return fetch_osm_json(south, west, north, east, overpass_url, overpass_timeout_s=45, read_timeout_s=70)
+        except OverpassFetchError as exc:
+            last_error = str(exc)
+            if attempt + 1 < TILED_FETCH_ATTEMPTS:
+                time.sleep(0.8 + attempt * 0.8)
+
+    if depth >= TILED_FETCH_MAX_DEPTH:
+        raise OverpassFetchError(last_error or "OpenStreetMap tile download failed.")
+
+    merged: dict[tuple[str, str], dict[str, Any]] = {}
+    child_errors: list[str] = []
+    for child in _split_bbox(south, west, north, east):
+        try:
+            child_data = _fetch_tile_recursive(*child, overpass_url=overpass_url, depth=depth + 1)
+        except OverpassFetchError as exc:
+            child_errors.append(str(exc))
+            continue
+        _merge_best_elements(merged, child_data.get("elements", []))
+
+    if child_errors:
+        detail = "; ".join(child_errors[:4])
+        raise OverpassFetchError(
+            "OpenStreetMap tile still failed after automatic subdivision. "
+            f"Original error: {last_error}. Subtile errors: {detail}"
+        )
+    return {
+        "version": 0.6,
+        "generator": "TopoTile Studio recursive tiled Overpass fetch",
+        "elements": list(merged.values()),
+    }
+
+
 def fetch_osm_json_tiled(
     south: float,
     west: float,
@@ -157,33 +232,31 @@ def fetch_osm_json_tiled(
     progress: Progress | None = None,
 ) -> dict[str, Any]:
     tiles = _bbox_tiles(south, west, north, east, tile_size_km)
-    elements: list[dict[str, Any]] = []
-    seen: set[tuple[str, str]] = set()
+    elements_by_id: dict[tuple[str, str], dict[str, Any]] = {}
     errors: list[str] = []
 
     for index, (ts, tw, tn, te) in enumerate(tiles, start=1):
         if progress:
             progress(f"Loading OpenStreetMap tile {index}/{len(tiles)}", (index - 1) / len(tiles))
         try:
-            data = fetch_osm_json(ts, tw, tn, te, overpass_url, overpass_timeout_s=45, read_timeout_s=70)
+            data = _fetch_tile_recursive(ts, tw, tn, te, overpass_url)
         except OverpassFetchError as exc:
             if len(tiles) == 1:
                 raise
             errors.append(f"tile {index}/{len(tiles)}: {exc}")
-            time.sleep(0.5)
             continue
-        for element in data.get("elements", []):
-            key = (str(element.get("type", "")), str(element.get("id", "")))
-            if key in seen:
-                continue
-            seen.add(key)
-            elements.append(element)
+        _merge_best_elements(elements_by_id, data.get("elements", []))
         time.sleep(0.15)
 
+    elements = list(elements_by_id.values())
     if progress:
         progress(f"Loaded {len(elements)} unique OpenStreetMap elements from {len(tiles)} tiles", 1.0)
-    if not elements and errors:
-        raise OverpassFetchError("; ".join(errors[:6]))
+    if errors:
+        detail = "; ".join(errors[:6])
+        raise OverpassFetchError(
+            "OpenStreetMap tiled download did not complete, so generation stopped to avoid missing "
+            f"buildings, roads, or green areas. Details: {detail}"
+        )
     return {
         "version": 0.6,
         "generator": "TopoTile Studio tiled Overpass fetch",

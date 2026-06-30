@@ -35,6 +35,19 @@ def test_model_params_airport_layer_defaults_on():
     assert params.include_airport is True
 
 
+def test_model_params_auto_repair_mesh_defaults_on_and_can_disable():
+    params = ModelParams.from_dict({"bbox": [47.62, -122.355, 47.626, -122.3455]})
+
+    assert params.auto_repair_mesh is True
+
+    disabled = ModelParams.from_dict({
+        "bbox": [47.62, -122.355, 47.626, -122.3455],
+        "auto_repair_mesh": "false",
+    })
+
+    assert disabled.auto_repair_mesh is False
+
+
 def test_model_params_accepts_auto_terrain():
     params = ModelParams.from_dict({
         "bbox": [47.62, -122.355, 47.626, -122.3455],

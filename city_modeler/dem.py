@@ -277,7 +277,7 @@ def make_terrain(
 ) -> tuple[TerrainGrid, str]:
     if dem_path:
         return make_dem_terrain(dem_path, projection, scaler, params), "uploaded_dem"
-    if params.large_map_mode:
+    if params.auto_terrain and params.large_map_mode:
         return make_terrain_tile_terrain(projection, scaler, params), "terrain_tiles"
     if params.auto_terrain:
         return make_auto_elevation_terrain(projection, scaler, params), "auto_elevation"

@@ -44,6 +44,26 @@
     .download-primary.alt { background: #0f766e; }
     .download-primary.disabled { pointer-events: none; background: #cbd5e1; color: #64748b; }
     model-viewer { width: 100%; height: 100%; min-height: 300px; background: #eef2f7; }
+    .preview-shell { position: relative; min-height: 300px; overflow: hidden; background: #eef2f7; }
+    .preview-toolbar {
+      position: absolute;
+      right: 12px;
+      bottom: 12px;
+      z-index: 2;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      border: 1px solid rgba(148, 163, 184, 0.55);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.92);
+      box-shadow: 0 2px 10px rgba(15, 23, 42, 0.14);
+      font-size: 12px;
+      font-weight: 800;
+      color: #334155;
+      margin: 0;
+    }
+    .preview-toolbar input { width: auto; }
     .checks { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
     .road-checks { grid-template-columns: 1fr 1fr; }
     .check { display: flex; align-items: center; gap: 6px; font-size: 13px; }
@@ -133,11 +153,13 @@
       <label class="check"><input id="large_map_mode" type="checkbox"> Large map mode</label>
       <label class="check"><input id="auto_terrain" type="checkbox"> Auto terrain relief</label>
     </div>
-    <div class="small">Large map mode internally chunks OSM and uses cached terrain tiles, then exports one complete 3MF. Uploaded DEM files override automatic terrain.</div>
+    <div class="small">Large map mode chunks OSM data for bigger selections. Auto terrain relief controls whether the base is flat or height-varying. Uploaded DEM files override automatic terrain.</div>
     <div class="row">
+      <div><label>Max terrain height, mm</label><input id="max_terrain_height_mm" type="number" value="35" min="1" max="120" step="1"></div>
       <div><label>Terrain tile zoom</label><input id="terrain_tile_zoom" type="number" value="13" min="8" max="14"></div>
       <div><label>OSM tile size, km</label><input id="osm_tile_size_km" type="number" value="2" min="0.5" max="20" step="0.5"></div>
     </div>
+    <div class="small" id="terrainModeStatus">Flat base: terrain relief controls are ignored unless Auto terrain relief is on or a DEM is uploaded.</div>
 
     <label>Layers</label>
     <div class="checks">
@@ -193,6 +215,12 @@
     </div>
     <div class="small">Numbering starts at the southwest corner: r01_c01, then east by column and north by row.</div>
 
+    <label>Mesh repair</label>
+    <div class="checks">
+      <label class="check"><input id="auto_repair_mesh" type="checkbox" checked> Auto repair non-manifold edges</label>
+    </div>
+    <div class="small">Runs before 3MF/GLB/STL export. It removes common degenerate/duplicate geometry and reports any remaining mesh issues.</div>
+
     <button class="primary" id="generate">Generate 3MF</button>
     <a class="download-primary disabled" id="download3mf" href="#" download>Download 3MF</a>
     <a class="download-primary alt disabled" id="downloadChunks" href="#" download>Download chunk ZIP</a>
@@ -212,7 +240,10 @@
 
   <section class="viewer">
     <div id="map"></div>
-    <model-viewer id="preview" camera-controls auto-rotate shadow-intensity="0.7" exposure="0.95" alt="3D preview will appear after generation"></model-viewer>
+    <div class="preview-shell">
+      <model-viewer id="preview" camera-controls auto-rotate shadow-intensity="0.7" exposure="0.95" alt="3D preview will appear after generation"></model-viewer>
+      <label class="preview-toolbar"><input id="preview_auto_rotate" type="checkbox" checked> Auto rotate</label>
+    </div>
   </section>
 </main>
 <script>
@@ -551,6 +582,53 @@
     }
   });
 
+  const preview = document.getElementById('preview');
+  const previewAutoRotate = document.getElementById('preview_auto_rotate');
+  let previewBaseRadius = null;
+
+  function syncPreviewAutoRotate() {
+    if (previewAutoRotate.checked) {
+      preview.setAttribute('auto-rotate', '');
+    } else {
+      preview.removeAttribute('auto-rotate');
+    }
+  }
+
+  function rememberPreviewRadius() {
+    if (!preview.getCameraOrbit) return;
+    const orbit = preview.getCameraOrbit();
+    if (orbit && Number.isFinite(orbit.radius) && orbit.radius > 0) {
+      previewBaseRadius = orbit.radius;
+    }
+  }
+
+  function zoomPreviewByWheel(event) {
+    if (!preview.getCameraOrbit) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    const orbit = preview.getCameraOrbit();
+    if (!orbit || !Number.isFinite(orbit.radius) || orbit.radius <= 0) return;
+    const base = Number.isFinite(previewBaseRadius) && previewBaseRadius > 0 ? previewBaseRadius : orbit.radius;
+    const minRadius = Math.max(base * 0.06, 0.02);
+    const maxRadius = Math.max(base * 14, orbit.radius * 1.05, 1);
+    const factor = Math.exp(event.deltaY * 0.0012);
+    const radius = Math.min(maxRadius, Math.max(minRadius, orbit.radius * factor));
+    preview.cameraOrbit = `${orbit.theta}rad ${orbit.phi}rad ${radius}m`;
+    if (preview.jumpCameraToGoal) preview.jumpCameraToGoal();
+  }
+
+  previewAutoRotate.addEventListener('change', syncPreviewAutoRotate);
+  preview.addEventListener('load', rememberPreviewRadius);
+  preview.addEventListener('wheel', zoomPreviewByWheel, {passive: false});
+  if (window.customElements && customElements.whenDefined) {
+    customElements.whenDefined('model-viewer').then(() => {
+      syncPreviewAutoRotate();
+      rememberPreviewRadius();
+    });
+  } else {
+    syncPreviewAutoRotate();
+  }
+
   const ROAD_CLEANING_PRESETS = {
     0: {
       label: 'Detailed: keeps service roads, paths, cycleways, tracks, and steps.',
@@ -624,15 +702,16 @@
 
   function applyProjectParams(saved) {
     const p = saved.params || saved;
-    const numericIds = ['south','west','north','east','max_size_mm','base_thickness_mm','vertical_exaggeration','terrain_grid_size','building_height_multiplier','max_building_height_mm','default_building_height_m','min_road_width_mm','footway_width_mm','pedestrian_width_mm','bridge_clearance_mm','terrain_tile_zoom','osm_tile_size_km','road_cleaning_level','chunk_rows','chunk_cols'];
+    const numericIds = ['south','west','north','east','max_size_mm','base_thickness_mm','vertical_exaggeration','terrain_grid_size','building_height_multiplier','max_building_height_mm','default_building_height_m','min_road_width_mm','footway_width_mm','pedestrian_width_mm','bridge_clearance_mm','max_terrain_height_mm','terrain_tile_zoom','osm_tile_size_km','road_cleaning_level','chunk_rows','chunk_cols'];
     numericIds.forEach(id => {
       if (p[id] !== undefined && document.getElementById(id)) document.getElementById(id).value = p[id];
     });
-    const boolIds = ['large_map_mode','auto_terrain','include_buildings','include_roads','include_water','cut_out_water','include_green','include_parking','include_airport','chunk_export'];
+    const boolIds = ['large_map_mode','auto_terrain','include_buildings','include_roads','include_water','cut_out_water','include_green','include_parking','include_airport','chunk_export','auto_repair_mesh'];
     boolIds.forEach(id => {
       if (p[id] !== undefined && document.getElementById(id)) document.getElementById(id).checked = Boolean(p[id]);
     });
     if (p.include_airport === undefined) document.getElementById('include_airport').checked = true;
+    if (p.auto_repair_mesh === undefined) document.getElementById('auto_repair_mesh').checked = true;
     if (p.output_name !== undefined) document.getElementById('output_name').value = p.output_name;
     if (p.dem_attribution !== undefined) document.getElementById('dem_attribution').value = p.dem_attribution;
     let mode = saved.selection_mode;
@@ -643,6 +722,7 @@
       if (selected) selected.checked = true;
     }
     updateRoadCleaningStatus();
+    updateTerrainModeStatus();
     if (Array.isArray(p.road_levels)) setRoadLevels(p.road_levels);
     drawRect();
   }
@@ -668,14 +748,39 @@
 
   document.getElementById('large_map_mode').addEventListener('change', event => {
     if (event.target.checked) {
-      document.getElementById('auto_terrain').checked = true;
       document.getElementById('terrain_grid_size').value = Math.max(parseFloat(document.getElementById('terrain_grid_size').value) || 0, 160);
       document.getElementById('terrain_tile_zoom').value = Math.max(parseFloat(document.getElementById('terrain_tile_zoom').value) || 0, 13);
     }
+    updateTerrainModeStatus();
   });
+  document.getElementById('auto_terrain').addEventListener('change', updateTerrainModeStatus);
+  document.getElementById('dem_file').addEventListener('change', updateTerrainModeStatus);
+
+  function updateTerrainModeStatus() {
+    const large = document.getElementById('large_map_mode').checked;
+    const auto = document.getElementById('auto_terrain').checked;
+    const hasDem = Boolean(document.getElementById('dem_file').files[0]);
+    const status = document.getElementById('terrainModeStatus');
+    document.getElementById('vertical_exaggeration').disabled = !(auto || hasDem);
+    document.getElementById('max_terrain_height_mm').disabled = !(auto || hasDem);
+    document.getElementById('terrain_tile_zoom').disabled = !(auto && large && !hasDem);
+    document.getElementById('osm_tile_size_km').disabled = !large;
+    if (hasDem) {
+      status.textContent = 'Terrain mode: uploaded DEM controls relief. Auto terrain and terrain tile zoom are ignored.';
+    } else if (auto && large) {
+      status.textContent = 'Terrain mode: large-map terrain tiles plus tiled OSM fetch.';
+    } else if (auto) {
+      status.textContent = 'Terrain mode: automatic elevation sampling for smaller selections.';
+    } else if (large) {
+      status.textContent = 'Flat large-map mode: tiled OSM fetch, flat base, no terrain height relief.';
+    } else {
+      status.textContent = 'Flat base: terrain relief controls are ignored unless Auto terrain relief is on or a DEM is uploaded.';
+    }
+  }
+  updateTerrainModeStatus();
 
   function params() {
-    const ids = ['south','west','north','east','max_size_mm','base_thickness_mm','vertical_exaggeration','terrain_grid_size','building_height_multiplier','max_building_height_mm','default_building_height_m','min_road_width_mm','footway_width_mm','pedestrian_width_mm','bridge_clearance_mm','terrain_tile_zoom','osm_tile_size_km','road_cleaning_level','chunk_rows','chunk_cols'];
+    const ids = ['south','west','north','east','max_size_mm','base_thickness_mm','vertical_exaggeration','terrain_grid_size','building_height_multiplier','max_building_height_mm','default_building_height_m','min_road_width_mm','footway_width_mm','pedestrian_width_mm','bridge_clearance_mm','max_terrain_height_mm','terrain_tile_zoom','osm_tile_size_km','road_cleaning_level','chunk_rows','chunk_cols'];
     const p = {};
     ids.forEach(id => p[id] = parseFloat(document.getElementById(id).value));
     p.large_map_mode = document.getElementById('large_map_mode').checked;
@@ -686,6 +791,7 @@
     p.include_water = document.getElementById('include_water').checked;
     p.cut_out_water = document.getElementById('cut_out_water').checked;
     p.chunk_export = document.getElementById('chunk_export').checked;
+    p.auto_repair_mesh = document.getElementById('auto_repair_mesh').checked;
     p.selection_shape = selectionShape();
     p.include_green = document.getElementById('include_green').checked;
     p.include_parking = document.getElementById('include_parking').checked;
@@ -726,6 +832,15 @@
           issues.forEach(issue => {
             statusEl.textContent += `\n- ${issue.level}: ${issue.message} ${issue.suggestion}`;
           });
+        }
+        if (s.mesh_repair) {
+          if (s.mesh_repair.enabled) {
+            const before = (((s.mesh_repair.totals || {}).before) || {}).non_manifold_edges || 0;
+            const after = (((s.mesh_repair.totals || {}).after) || {}).non_manifold_edges || 0;
+            statusEl.textContent += `\nMesh repair: ${s.mesh_repair.status}, non-manifold edges ${before} → ${after}`;
+          } else {
+            statusEl.textContent += '\nMesh repair: disabled';
+          }
         }
         statusEl.textContent += `\n3MF triangles: ${s.validation_3mf.triangles}`;
       }

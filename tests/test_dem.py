@@ -1,6 +1,6 @@
 import numpy as np
 
-from city_modeler.dem import fetch_open_meteo_elevations, lonlat_to_tile, make_auto_elevation_terrain
+from city_modeler.dem import TerrainGrid, fetch_open_meteo_elevations, lonlat_to_tile, make_auto_elevation_terrain, make_terrain
 from city_modeler.geo import make_local_projection, make_scaler
 from city_modeler.params import ModelParams
 
@@ -63,3 +63,54 @@ def test_make_auto_elevation_terrain_has_relief(monkeypatch):
     assert terrain.nx == 6 or terrain.ny == 6
     assert np.max(terrain.z_mm) > np.min(terrain.z_mm)
     assert np.min(terrain.z_mm) == params.base_thickness_mm
+
+
+def test_large_map_without_auto_terrain_stays_flat(monkeypatch):
+    def fail_terrain_tiles(*args, **kwargs):
+        raise AssertionError("terrain tiles should not be used for flat large-map mode")
+
+    monkeypatch.setattr("city_modeler.dem.make_terrain_tile_terrain", fail_terrain_tiles)
+    params = ModelParams(
+        south=47.0,
+        west=-122.0,
+        north=47.01,
+        east=-121.99,
+        large_map_mode=True,
+        auto_terrain=False,
+        vertical_exaggeration=10,
+    )
+    projection = make_local_projection(*params.bbox_tuple)
+    scaler = make_scaler(projection.width_m, projection.height_m, params.max_size_mm)
+
+    terrain, source = make_terrain(None, projection, scaler, params)
+
+    assert source == "flat"
+    assert terrain.nx == 2
+    assert terrain.ny == 2
+    assert np.allclose(terrain.z_mm, params.base_thickness_mm)
+
+
+def test_large_map_with_auto_terrain_uses_terrain_tiles(monkeypatch):
+    def fake_terrain_tiles(_projection, _scaler, params):
+        return TerrainGrid(
+            x_mm=np.asarray([[0.0, 10.0], [0.0, 10.0]]),
+            y_mm=np.asarray([[0.0, 0.0], [10.0, 10.0]]),
+            z_mm=np.asarray([[params.base_thickness_mm, params.base_thickness_mm + 2.0], [params.base_thickness_mm + 1.0, params.base_thickness_mm + 3.0]]),
+        )
+
+    monkeypatch.setattr("city_modeler.dem.make_terrain_tile_terrain", fake_terrain_tiles)
+    params = ModelParams(
+        south=47.0,
+        west=-122.0,
+        north=47.01,
+        east=-121.99,
+        large_map_mode=True,
+        auto_terrain=True,
+    )
+    projection = make_local_projection(*params.bbox_tuple)
+    scaler = make_scaler(projection.width_m, projection.height_m, params.max_size_mm)
+
+    terrain, source = make_terrain(None, projection, scaler, params)
+
+    assert source == "terrain_tiles"
+    assert float(np.ptp(terrain.z_mm)) == 3.0

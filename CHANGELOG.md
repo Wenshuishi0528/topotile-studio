@@ -6,6 +6,32 @@ Time zone: local macOS time on 2026-06-29. Some early entries are reconstructed 
 
 ## 2026-06-29
 
+### 22:36 - Automatic Mesh Repair for Non-Manifold Edges
+
+- Added automatic mesh repair before exporting `.3mf`, `.glb`, and `.stl` files.
+- Removed common degenerate faces, duplicate faces, duplicate vertices, inconsistent winding, inverted normals, and simple holes during generation.
+- Added a default-on `Auto repair non-manifold edges` option in the web UI.
+- Added mesh repair diagnostics to job summaries and the on-page generation status.
+- Added printability warnings when non-manifold edges remain after automatic repair.
+- Added regression tests for mesh repair, parameter save/load, and full generation summaries.
+
+### 22:28 - Flat vs Terrain Mode Separation
+
+- Rechecked flat and terrain generation as separate modes.
+- Changed Large Map Mode so it only controls tiled OSM fetching; terrain relief now requires `Auto terrain relief` or an uploaded DEM.
+- Preserved the existing large terrain workflow when both Large Map Mode and Auto Terrain Relief are enabled.
+- Added a terrain-mode status hint in the web UI and exposed `Max terrain height, mm` as a terrain-specific control.
+- Disabled terrain-only controls in the UI when the current setup is flat-only.
+- Added regression tests covering flat large-map mode and terrain-tile mode.
+
+### 22:20 - Terrain-Draped Surface Layers and Complete Large-Map OSM Fetch
+
+- Fixed terrain mode surface layers so green areas, water, parking, airport pavement, and roundabout surfaces follow sampled terrain instead of extruding as one flat slab.
+- Added terrain-grid point sampling and boundary densification for large surface polygons so hillside parks and forests conform to terrain relief.
+- Densified normal road segments in terrain mode so long roads follow slopes instead of spanning across terrain peaks as straight beams.
+- Improved large-map OSM fetching to keep the richest duplicate geometry when a feature appears in multiple tiles.
+- Added automatic subdivision retries for failed OSM tiles and stopped generation if any tile still fails, preventing partial exports with missing buildings, roads, or green areas.
+
 ### 21:18 - Airport Pavement Layer and Water/Green Surface Repair
 
 - Added an `Airport` layer option enabled by default.

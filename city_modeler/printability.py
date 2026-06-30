@@ -54,6 +54,28 @@ def printability_report(params: ModelParams, summary: dict[str, Any]) -> dict[st
     elif triangles > 350_000:
         add("info", 6, "3MF mesh is moderately dense.", "If Bambu Studio feels slow, lower terrain grid size.")
 
+    repair = summary.get("mesh_repair") or {}
+    if repair.get("enabled"):
+        totals = repair.get("totals") or {}
+        after = totals.get("after") or {}
+        before = totals.get("before") or {}
+        remaining = int(after.get("non_manifold_edges", 0))
+        fixed = int(before.get("non_manifold_edges", 0)) - remaining
+        if remaining > 0:
+            add("warning", 12, "Mesh repair found remaining non-manifold edges.", "Try reducing terrain/grid detail or road detail if Bambu Studio still reports repair issues.")
+        elif fixed > 0:
+            issues.append({
+                "level": "info",
+                "message": "Automatic mesh repair fixed non-manifold edges before export.",
+                "suggestion": "Open the 3MF in Bambu Studio to confirm no additional repair prompt appears.",
+            })
+    else:
+        issues.append({
+            "level": "info",
+            "message": "Automatic mesh repair is disabled.",
+            "suggestion": "Enable mesh repair if Bambu Studio reports non-manifold edges.",
+        })
+
     features = summary.get("features") or {}
     if params.include_buildings and int(features.get("buildings", 0)) == 0:
         add("info", 3, "No buildings were found in this selection.", "Move or enlarge the selection if buildings are expected.")
