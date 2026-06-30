@@ -6,7 +6,7 @@ from shapely.ops import unary_union
 
 from city_modeler.dem import TerrainGrid
 from city_modeler.geo import ModelScaler
-from city_modeler.mesh_ops import build_road_meshes, is_bridge, road_width_m, road_width_mm, terrain_to_mesh
+from city_modeler.mesh_ops import build_road_meshes, build_surface_layer_meshes, extrude_polygon, is_bridge, road_width_m, road_width_mm, terrain_to_mesh
 from city_modeler.osm import OSMFeature
 from city_modeler.params import ModelParams
 
@@ -53,6 +53,45 @@ def test_footway_and_pedestrian_have_independent_print_widths():
     assert road_width_mm(pedestrian.tags, scaler, params) == 0.7
     assert math.isclose(float(np.ptp(footway_mesh.vertices[:, 1])), 0.4, abs_tol=1e-6)
     assert math.isclose(float(np.ptp(pedestrian_mesh.vertices[:, 1])), 0.7, abs_tol=1e-6)
+
+
+def test_airport_layer_uses_parking_thickness_for_runway_lines():
+    params = ModelParams(south=0.0, west=0.0, north=0.01, east=0.01)
+    scaler = ModelScaler(scale_mm_per_m=1.0, width_mm=80.0, height_mm=80.0)
+    terrain = TerrainGrid(
+        x_mm=np.asarray([[0.0, 80.0], [0.0, 80.0]]),
+        y_mm=np.asarray([[0.0, 0.0], [80.0, 80.0]]),
+        z_mm=np.full((2, 2), 3.0),
+    )
+    runway = OSMFeature(
+        layer="airport",
+        geometry_m=LineString([(10.0, 40.0), (70.0, 40.0)]),
+        tags={"aeroway": "runway", "width": "20 m"},
+        osm_id="way/runway",
+    )
+
+    parts = build_surface_layer_meshes([], [], [], [], [runway], scaler, terrain, params)
+    airport = next(part for part in parts if part.name == "airport")
+
+    assert not airport.is_empty()
+    assert math.isclose(float(airport.vertices[:, 2].min()), 3.06, abs_tol=1e-6)
+    assert math.isclose(float(airport.vertices[:, 2].max()), 3.26, abs_tol=1e-6)
+
+
+def test_concave_surface_extrusion_does_not_fill_outside_notch():
+    poly = Polygon([(0, 0), (5, 0), (5, 2), (2, 2), (2, 5), (0, 5), (0, 0)])
+
+    mesh = extrude_polygon(poly, 0.0, 1.0, "concave", (1, 2, 3, 255))
+    top_tris = []
+    for face in mesh.faces:
+        tri = mesh.vertices[face]
+        if np.allclose(tri[:, 2], 1.0):
+            top_tris.append(Polygon([(float(x), float(y)) for x, y, _ in tri]))
+    top_surface = unary_union(top_tris)
+
+    assert poly.difference(top_surface).area < 1e-6
+    assert top_surface.difference(poly).area < 1e-6
+    assert not top_surface.covers(Point(4.0, 4.0))
 
 
 def test_roundabout_mesh_keeps_center_island_open():

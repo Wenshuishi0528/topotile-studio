@@ -7,6 +7,7 @@ import numpy as np
 
 from shapely.geometry import Polygon, MultiPolygon, LineString, MultiLineString, GeometryCollection, Point
 from shapely.geometry.base import BaseGeometry
+from shapely import constrained_delaunay_triangles
 from shapely.ops import triangulate, unary_union
 from shapely.validation import make_valid
 
@@ -23,6 +24,7 @@ COLORS = {
     "water": (60, 140, 220, 255),
     "green": (80, 160, 90, 255),
     "parking": (168, 168, 156, 255),
+    "airport": (168, 168, 156, 255),
 }
 
 
@@ -207,15 +209,20 @@ def extrude_polygon(poly: Polygon, z0: float, z1: float, name: str, color: tuple
     faces: list[tuple[int, int, int]] = []
 
     try:
-        triangles = triangulate(poly)
+        constrained = constrained_delaunay_triangles(poly)
+        triangles = list(iter_polygons(constrained))
     except Exception:
         triangles = []
+    if not triangles:
+        try:
+            triangles = triangulate(poly)
+        except Exception:
+            triangles = []
 
     for tri in triangles:
         if tri.is_empty or tri.area <= 1e-9:
             continue
-        # For polygons with holes, point-only tests can leave bridge triangles across voids.
-        if not (poly.covers(tri) if poly.interiors else poly.covers(tri.representative_point())):
+        if not poly.covers(tri.representative_point()):
             continue
         coords = [(float(x), float(y)) for x, y in list(tri.exterior.coords)[:3]]
         _add_triangle(vertices, faces, coords, z1, up=True)
@@ -553,6 +560,16 @@ def water_line_width_m(tags: dict[str, str]) -> float:
     return widths.get(waterway, 2.5)
 
 
+def aeroway_width_m(tags: dict[str, str]) -> float:
+    if "width" in tags:
+        value = parse_length_m(tags["width"], min_m=1.0, max_m=120.0)
+        if value is not None:
+            return value
+    aeroway = tags.get("aeroway", "")
+    widths = {"runway": 35.0, "taxiway": 12.0, "apron": 25.0}
+    return widths.get(aeroway, 12.0)
+
+
 def _buffer_feature_lines(features: list[OSMFeature], scaler: ModelScaler, params: ModelParams, kind: str) -> list[Polygon]:
     polys: list[Polygon] = []
     min_m = scaler.length_mm_to_m(params.min_road_width_mm)
@@ -560,6 +577,8 @@ def _buffer_feature_lines(features: list[OSMFeature], scaler: ModelScaler, param
         for line in iter_lines(feature.geometry_m):
             if kind == "road":
                 width = scaler.length_mm_to_m(road_width_mm(feature.tags, scaler, params))
+            elif kind == "airport":
+                width = aeroway_width_m(feature.tags)
             else:
                 width = max(water_line_width_m(feature.tags), min_m)
             try:
@@ -599,9 +618,10 @@ def make_layer_mesh(
     thickness_mm: float,
     z_offset_mm: float,
     color: tuple[int, int, int, int],
+    simplify_tolerance_mm: float | None = None,
 ) -> MeshPart:
     parts: list[MeshPart] = []
-    tol_m = scaler.length_mm_to_m(params.simplify_tolerance_mm)
+    tol_m = scaler.length_mm_to_m(params.simplify_tolerance_mm if simplify_tolerance_mm is None else simplify_tolerance_mm)
     for poly_m in polygons_m:
         poly = transform_polygon_to_mm(poly_m, scaler, tol_m)
         if poly is None:
@@ -638,6 +658,7 @@ def build_surface_layer_meshes(
     water_features: list[OSMFeature],
     green_features: list[OSMFeature],
     parking_features: list[OSMFeature],
+    airport_features: list[OSMFeature],
     scaler: ModelScaler,
     terrain: TerrainGrid,
     params: ModelParams,
@@ -647,19 +668,30 @@ def build_surface_layer_meshes(
     water_polys = _feature_polygons(water_features) + _buffer_feature_lines(water_features, scaler, params, "water")
     green_polys = _feature_polygons(green_features)
     parking_polys = _feature_polygons(parking_features)
+    airport_polys = _feature_polygons(airport_features) + _buffer_feature_lines(airport_features, scaler, params, "airport")
 
     water_union = unary_union(water_polys) if water_polys else None
     road_cutout_union = unary_union(_buffer_feature_lines(road_features, scaler, params, "road")) if road_features else None
     parking_union = unary_union(parking_polys) if parking_polys else None
+    airport_union = unary_union(airport_polys) if airport_polys else None
 
     cleaned_parking: list[Polygon] = []
     for pp in parking_polys:
         geom: BaseGeometry = pp
         if water_union and not water_union.is_empty:
             geom = geom.difference(water_union)
+        if params.include_airport and airport_union and not airport_union.is_empty:
+            geom = geom.difference(airport_union)
         if road_cutout_union and not road_cutout_union.is_empty:
             geom = geom.difference(road_cutout_union)
         cleaned_parking.extend(list(iter_polygons(geom)))
+
+    cleaned_airport: list[Polygon] = []
+    for ap in airport_polys:
+        geom: BaseGeometry = ap
+        if water_union and not water_union.is_empty:
+            geom = geom.difference(water_union)
+        cleaned_airport.extend(list(iter_polygons(geom)))
 
     # Green is deliberately lower priority than water, parking, and roads.
     cleaned_green: list[Polygon] = []
@@ -669,16 +701,21 @@ def build_surface_layer_meshes(
             geom = geom.difference(water_union)
         if params.include_parking and parking_union and not parking_union.is_empty:
             geom = geom.difference(parking_union)
+        if params.include_airport and airport_union and not airport_union.is_empty:
+            geom = geom.difference(airport_union)
         if road_cutout_union and not road_cutout_union.is_empty:
             geom = geom.difference(road_cutout_union)
         cleaned_green.extend(list(iter_polygons(geom)))
 
+    surface_tol_mm = min(params.simplify_tolerance_mm, 0.03)
     if params.include_green:
-        parts.append(make_layer_mesh("green", cleaned_green, scaler, terrain, params, thickness_mm=0.25, z_offset_mm=0.05, color=COLORS["green"]))
+        parts.append(make_layer_mesh("green", cleaned_green, scaler, terrain, params, thickness_mm=0.25, z_offset_mm=0.05, color=COLORS["green"], simplify_tolerance_mm=surface_tol_mm))
     if params.include_parking:
-        parts.append(make_layer_mesh("parking", cleaned_parking, scaler, terrain, params, thickness_mm=0.20, z_offset_mm=0.06, color=COLORS["parking"]))
+        parts.append(make_layer_mesh("parking", cleaned_parking, scaler, terrain, params, thickness_mm=0.20, z_offset_mm=0.06, color=COLORS["parking"], simplify_tolerance_mm=surface_tol_mm))
+    if params.include_airport:
+        parts.append(make_layer_mesh("airport", cleaned_airport, scaler, terrain, params, thickness_mm=0.20, z_offset_mm=0.06, color=COLORS["airport"], simplify_tolerance_mm=surface_tol_mm))
     if params.include_water and not params.cut_out_water:
-        parts.append(make_layer_mesh("water", list(iter_polygons(water_union)) if water_union else [], scaler, terrain, params, thickness_mm=0.35, z_offset_mm=0.08, color=COLORS["water"]))
+        parts.append(make_layer_mesh("water", list(iter_polygons(water_union)) if water_union else [], scaler, terrain, params, thickness_mm=0.35, z_offset_mm=0.08, color=COLORS["water"], simplify_tolerance_mm=surface_tol_mm))
     if params.include_roads:
         parts.append(build_road_meshes(road_features, scaler, terrain, params, water_union if params.cut_out_water else None))
 

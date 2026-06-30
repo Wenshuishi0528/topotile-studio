@@ -49,6 +49,8 @@ def overpass_query(south: float, west: float, north: float, east: float, timeout
   way["highway"]({bbox});
   way["amenity"="parking"]({bbox});
   relation["amenity"="parking"]({bbox});
+  way["aeroway"~"runway|taxiway|apron"]({bbox});
+  relation["aeroway"~"runway|taxiway|apron"]({bbox});
   way["natural"="water"]({bbox});
   way["natural"~"bay|strait"]({bbox});
   way["natural"="coastline"]({bbox});
@@ -209,6 +211,8 @@ def classify(tags: dict[str, Any], is_closed: bool) -> str | None:
         return "road"
     if _is_surface_parking(tags):
         return "parking"
+    if tags.get("aeroway") in {"runway", "taxiway", "apron"}:
+        return "airport"
     if tags.get("natural") == "coastline":
         return "coastline"
     if tags.get("natural") in {"water", "bay", "strait"} or "water" in tags:
@@ -460,7 +464,7 @@ def parse_osm_features(osm_json: dict[str, Any], projection: LocalProjection) ->
         tags = {str(k): str(v) for k, v in (element.get("tags") or {}).items()}
         if element_type == "relation":
             layer = classify(tags, is_closed=True)
-            if layer in {"water", "green", "building", "parking"}:
+            if layer in {"water", "green", "building", "parking", "airport"}:
                 for poly in _polygons_from_relation(element, projection, clip):
                     features.append(OSMFeature(layer=layer, geometry_m=poly, tags=tags, osm_id=f"relation/{element.get('id', 'unknown')}"))
             continue
@@ -483,7 +487,7 @@ def parse_osm_features(osm_json: dict[str, Any], projection: LocalProjection) ->
             if layer == "coastline":
                 coastlines.append(LineString(local_coords))
                 continue
-            if layer in {"building", "water", "green", "parking"} and is_closed:
+            if layer in {"building", "water", "green", "parking", "airport"} and is_closed:
                 geom: BaseGeometry = Polygon(local_coords)
             else:
                 geom = LineString(local_coords)

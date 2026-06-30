@@ -147,7 +147,9 @@
       <label class="check"><input id="cut_out_water" type="checkbox"> Cut out water</label>
       <label class="check"><input id="include_green" type="checkbox" checked> Green</label>
       <label class="check"><input id="include_parking" type="checkbox" checked> Parking</label>
+      <label class="check"><input id="include_airport" type="checkbox" checked> Airport</label>
     </div>
+    <div class="small">Airport includes runways, taxiways, and aprons as a low layer with parking-lot thickness.</div>
     <div class="small">Cut out water removes lakes and ocean from the base so you can place colored material underneath.</div>
 
     <label>Road cleanup strength</label>
@@ -626,10 +628,11 @@
     numericIds.forEach(id => {
       if (p[id] !== undefined && document.getElementById(id)) document.getElementById(id).value = p[id];
     });
-    const boolIds = ['large_map_mode','auto_terrain','include_buildings','include_roads','include_water','cut_out_water','include_green','include_parking','chunk_export'];
+    const boolIds = ['large_map_mode','auto_terrain','include_buildings','include_roads','include_water','cut_out_water','include_green','include_parking','include_airport','chunk_export'];
     boolIds.forEach(id => {
       if (p[id] !== undefined && document.getElementById(id)) document.getElementById(id).checked = Boolean(p[id]);
     });
+    if (p.include_airport === undefined) document.getElementById('include_airport').checked = true;
     if (p.output_name !== undefined) document.getElementById('output_name').value = p.output_name;
     if (p.dem_attribution !== undefined) document.getElementById('dem_attribution').value = p.dem_attribution;
     let mode = saved.selection_mode;
@@ -686,6 +689,7 @@
     p.selection_shape = selectionShape();
     p.include_green = document.getElementById('include_green').checked;
     p.include_parking = document.getElementById('include_parking').checked;
+    p.include_airport = document.getElementById('include_airport').checked;
     p.dem_attribution = document.getElementById('dem_attribution').value;
     p.output_name = document.getElementById('output_name').value.trim() || 'city_model';
     p.project_name = p.output_name;

@@ -29,6 +29,12 @@ def test_model_params_default_footway_and_pedestrian_widths_are_06():
     assert params.pedestrian_width_mm == 0.60
 
 
+def test_model_params_airport_layer_defaults_on():
+    params = ModelParams.from_dict({"bbox": [47.62, -122.355, 47.626, -122.3455]})
+
+    assert params.include_airport is True
+
+
 def test_model_params_accepts_auto_terrain():
     params = ModelParams.from_dict({
         "bbox": [47.62, -122.355, 47.626, -122.3455],
@@ -272,6 +278,46 @@ def test_parse_surface_parking_only():
 
     assert len(parking) == 1
     assert parking[0].osm_id == "way/20"
+
+
+def test_parse_airport_runway_taxiway_and_apron():
+    projection = make_local_projection(47.0, -122.0, 47.01, -121.99)
+
+    def point(lon, lat):
+        return {"lon": lon, "lat": lat}
+
+    osm_json = {
+        "elements": [
+            {
+                "type": "way",
+                "id": 40,
+                "tags": {"aeroway": "runway", "width": "45 m"},
+                "geometry": [point(-121.999, 47.001), point(-121.991, 47.001)],
+            },
+            {
+                "type": "way",
+                "id": 41,
+                "tags": {"aeroway": "taxiway"},
+                "geometry": [point(-121.999, 47.002), point(-121.991, 47.002)],
+            },
+            {
+                "type": "way",
+                "id": 42,
+                "tags": {"aeroway": "apron"},
+                "geometry": [
+                    point(-121.998, 47.003), point(-121.996, 47.003),
+                    point(-121.996, 47.005), point(-121.998, 47.005),
+                    point(-121.998, 47.003),
+                ],
+            },
+        ]
+    }
+
+    features = parse_osm_features(osm_json, projection)
+    airport = [feature for feature in features if feature.layer == "airport"]
+
+    assert len(airport) == 3
+    assert {feature.osm_id for feature in airport} == {"way/40", "way/41", "way/42"}
 
 
 def test_parse_coastline_creates_water_side_polygon():

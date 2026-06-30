@@ -6,6 +6,15 @@ Time zone: local macOS time on 2026-06-29. Some early entries are reconstructed 
 
 ## 2026-06-29
 
+### 21:18 - Airport Pavement Layer and Water/Green Surface Repair
+
+- Added an `Airport` layer option enabled by default.
+- Airport runways, taxiways, and aprons are parsed from `aeroway=runway|taxiway|apron`.
+- Airport pavement is generated as a low layer with the same thickness as surface parking.
+- Improved complex water and green-area surface triangulation with constrained triangulation.
+- Reduced independent simplification on water, green, parking, and airport surfaces to avoid visible cracks between adjacent lake/park boundaries.
+- Verified the Summer Palace / Xishan project from a saved project JSON and existing OSM raw data without making a new Overpass request.
+
 ### 20:45 - Custom Export File Names
 
 - Added a `File name` field in the project panel.

@@ -84,6 +84,7 @@ class ModelParams:
     include_water: bool = True
     include_green: bool = True
     include_parking: bool = True
+    include_airport: bool = True
 
     osm_overpass_url: str = "https://overpass-api.de/api/interpreter"
     road_levels: list[str] = field(default_factory=lambda: list(DEFAULT_ROAD_LEVELS))
@@ -120,7 +121,7 @@ class ModelParams:
         int_fields = {"terrain_grid_size", "terrain_tile_zoom", "road_cleaning_level", "chunk_rows", "chunk_cols"}
         bool_fields = {
             "auto_terrain", "large_map_mode", "cut_out_water", "chunk_export", "include_buildings", "include_roads",
-            "include_water", "include_green", "include_parking"
+            "include_water", "include_green", "include_parking", "include_airport"
         }
 
         for key in numeric_fields & filtered.keys():

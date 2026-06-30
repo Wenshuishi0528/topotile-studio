@@ -37,6 +37,8 @@ def test_overpass_query_includes_building_parts_and_green_relations():
     assert 'relation["building:part"]' in query
     assert 'way["amenity"="parking"]' in query
     assert 'relation["amenity"="parking"]' in query
+    assert 'way["aeroway"~"runway|taxiway|apron"]' in query
+    assert 'relation["aeroway"~"runway|taxiway|apron"]' in query
     assert 'relation["leisure"~' in query
     assert 'way["landcover"~' in query
     assert 'relation["landcover"~' in query
