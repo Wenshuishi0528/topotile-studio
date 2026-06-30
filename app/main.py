@@ -98,11 +98,21 @@ def directory_size(path: Path) -> int:
 
 def cache_status_payload() -> dict[str, Any]:
     terrain_cache = CACHE_DIR / "terrain_tiles"
+    osm_cache = CACHE_DIR / "osm"
+    elevation_cache = CACHE_DIR / "elevation"
     return {
         "jobs_bytes": directory_size(JOBS_DIR),
         "outputs_bytes": directory_size(OUTPUTS_DIR),
         "terrain_cache_bytes": directory_size(terrain_cache),
-        "total_bytes": directory_size(JOBS_DIR) + directory_size(OUTPUTS_DIR) + directory_size(terrain_cache),
+        "osm_cache_bytes": directory_size(osm_cache),
+        "elevation_cache_bytes": directory_size(elevation_cache),
+        "total_bytes": (
+            directory_size(JOBS_DIR)
+            + directory_size(OUTPUTS_DIR)
+            + directory_size(terrain_cache)
+            + directory_size(osm_cache)
+            + directory_size(elevation_cache)
+        ),
     }
 
 
@@ -341,6 +351,8 @@ def clear_cache(payload: dict[str, Any] | None = Body(default=None)) -> dict[str
     payload = payload or {}
     include_generated = bool(payload.get("generated", True))
     include_terrain = bool(payload.get("terrain", False))
+    include_osm = bool(payload.get("osm", False))
+    include_elevation = bool(payload.get("elevation", False))
     before = cache_status_payload()
     removed = 0
     cleared: list[str] = []
@@ -354,6 +366,12 @@ def clear_cache(payload: dict[str, Any] | None = Body(default=None)) -> dict[str
     if include_terrain:
         removed += clear_directory_contents(CACHE_DIR / "terrain_tiles")
         cleared.append("terrain_tiles")
+    if include_osm:
+        removed += clear_directory_contents(CACHE_DIR / "osm")
+        cleared.append("osm")
+    if include_elevation:
+        removed += clear_directory_contents(CACHE_DIR / "elevation")
+        cleared.append("elevation")
     after = cache_status_payload()
     return {
         "cleared": cleared,

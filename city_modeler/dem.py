@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import hashlib
+import json
 import math
 import numpy as np
 from pyproj import Transformer
@@ -13,6 +15,7 @@ from .params import ModelParams
 OPEN_METEO_ELEVATION_URL = "https://api.open-meteo.com/v1/elevation"
 TERRAIN_TILE_URL = "https://s3.amazonaws.com/elevation-tiles-prod/geotiff/{z}/{x}/{y}.tif"
 TERRAIN_TILE_CACHE = Path(__file__).resolve().parents[1] / "data" / "cache" / "terrain_tiles"
+OPEN_METEO_CACHE = Path(__file__).resolve().parents[1] / "data" / "cache" / "elevation" / "open_meteo"
 AUTO_ELEVATION_MAX_GRID_SIZE = 48
 AUTO_ELEVATION_ATTRIBUTION = (
     "Elevation data: Copernicus DEM GLO-90 via Open-Meteo Elevation API. "
@@ -158,9 +161,60 @@ def _chunks(items: list[tuple[float, float]], size: int) -> list[list[tuple[floa
     return [items[i:i + size] for i in range(0, len(items), size)]
 
 
+def _open_meteo_cache_key(lonlat: list[tuple[float, float]]) -> str:
+    payload = {
+        "source": "open_meteo_elevation_v1",
+        "points": [[round(lon, 6), round(lat, 6)] for lon, lat in lonlat],
+    }
+    text = json.dumps(payload, separators=(",", ":"), sort_keys=True)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _open_meteo_cache_path(key: str) -> Path:
+    return OPEN_METEO_CACHE / f"{key}.json"
+
+
+def _load_open_meteo_cache(key: str, expected_len: int) -> list[float] | None:
+    path = _open_meteo_cache_path(key)
+    if not path.exists() or path.stat().st_size <= 0:
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    values = data.get("elevation") if isinstance(data, dict) else None
+    if not isinstance(values, list) or len(values) != expected_len:
+        return None
+    try:
+        return [np.nan if value is None else float(value) for value in values]
+    except (TypeError, ValueError):
+        return None
+
+
+def _save_open_meteo_cache(key: str, values: list[float]) -> None:
+    OPEN_METEO_CACHE.mkdir(parents=True, exist_ok=True)
+    path = _open_meteo_cache_path(key)
+    tmp = path.with_suffix(".tmp")
+    serializable = [None if not np.isfinite(value) else float(value) for value in values]
+    try:
+        tmp.write_text(json.dumps({"elevation": serializable}), encoding="utf-8")
+        tmp.replace(path)
+    except OSError:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
 def fetch_open_meteo_elevations(lonlat: list[tuple[float, float]]) -> list[float]:
     elevations: list[float] = []
     for chunk in _chunks(lonlat, 100):
+        cache_key = _open_meteo_cache_key(chunk)
+        cached = _load_open_meteo_cache(cache_key, len(chunk))
+        if cached is not None:
+            elevations.extend(cached)
+            continue
+
         latitudes = ",".join(f"{lat:.6f}" for _, lat in chunk)
         longitudes = ",".join(f"{lon:.6f}" for lon, _ in chunk)
         try:
@@ -182,8 +236,11 @@ def fetch_open_meteo_elevations(lonlat: list[tuple[float, float]]) -> list[float
         values = payload.get("elevation")
         if not isinstance(values, list) or len(values) != len(chunk):
             raise RuntimeError("Open-Meteo elevation returned an unexpected response shape.")
+        chunk_elevations: list[float] = []
         for value in values:
-            elevations.append(np.nan if value is None else float(value))
+            chunk_elevations.append(np.nan if value is None else float(value))
+        _save_open_meteo_cache(cache_key, chunk_elevations)
+        elevations.extend(chunk_elevations)
     return elevations
 
 

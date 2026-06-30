@@ -34,7 +34,7 @@ The first target is Bambu Lab A1 printing: the app exports a standard `.3mf` fil
 - Supports project save/load JSON files
 - Supports custom export filenames
 - Supports numbered chunk export with a ZIP bundle and manifest
-- Includes cache status and cleanup controls for generated jobs and terrain tiles
+- Includes cache status and cleanup controls for generated jobs, OSM downloads, Open-Meteo elevation samples, and terrain tiles
 - Downloads OSM features through Overpass API
 - Supports closed OSM water ways, water multipolygon relations, and coastline-derived ocean water when coastline data crosses the selection
 - Supports airport runways, taxiways, and aprons as a low printable pavement layer
@@ -127,11 +127,11 @@ For OSM data, the app writes:
 Data © OpenStreetMap contributors, available under the Open Database License.
 ```
 
-The app uses public Overpass API instances for OpenStreetMap feature downloads. Normal use does not require an API key or registration. If a public Overpass server rejects a request, shrink the selection area or retry later.
+The app uses public Overpass API instances for OpenStreetMap feature downloads. Normal use does not require an API key or registration. Successful OSM responses are cached under `data/cache/osm/`; if a public Overpass server rejects a request, shrink the selection area or retry later.
 
 If you upload a DEM, add the DEM source attribution in the UI field before generating.
 
-If you enable auto terrain relief, the app uses Open-Meteo Elevation API data based on Copernicus DEM GLO-90. Open-Meteo does not require an API key for this normal local use.
+If you enable auto terrain relief, the app uses Open-Meteo Elevation API data based on Copernicus DEM GLO-90. Open-Meteo does not require an API key for this normal local use. Successful elevation batches are cached under `data/cache/elevation/open_meteo/`.
 
 If you enable Large Map Mode, the app uses Mapzen/AWS Terrain Tiles for elevation and stores them under `data/cache/terrain_tiles/`.
 

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
+import hashlib
 import math
 import time
 from typing import Any, Callable, Iterable
@@ -22,6 +24,18 @@ FALLBACK_OVERPASS_URLS = [
 OVERPASS_USER_AGENT = "OSM-DEM-3MF-Modeler/0.1 (local desktop 3D-printing app)"
 TILED_FETCH_MAX_DEPTH = 2
 TILED_FETCH_ATTEMPTS = 2
+OSM_CACHE_DIR = Path(__file__).resolve().parents[1] / "data" / "cache" / "osm"
+AREA_INFILL_LANDUSE_RE = (
+    "residential|industrial|commercial|retail|garages|depot|railway|brownfield|construction|"
+    "military|education|institutional|civic_admin|religious"
+)
+AREA_INFILL_AMENITY_RE = (
+    "hospital|clinic|school|university|college|kindergarten|public_building|townhall|police|"
+    "fire_station|prison|marketplace|place_of_worship|community_centre"
+)
+AREA_INFILL_TOURISM_RE = "theme_park|attraction|museum|hotel"
+AREA_INFILL_HISTORIC_RE = "district|yes|archaeological_site|monument|castle"
+AREA_INFILL_MAN_MADE_RE = "works|industrial"
 
 
 class OverpassFetchError(RuntimeError):
@@ -76,9 +90,61 @@ def overpass_query(south: float, west: float, north: float, east: float, timeout
   relation["man_made"="planter"]({bbox});
   relation["boundary"="protected_area"]({bbox});
   relation["amenity"="grave_yard"]({bbox});
+  way["landuse"~"{AREA_INFILL_LANDUSE_RE}"]({bbox});
+  relation["landuse"~"{AREA_INFILL_LANDUSE_RE}"]({bbox});
+  way["amenity"~"{AREA_INFILL_AMENITY_RE}"]({bbox});
+  relation["amenity"~"{AREA_INFILL_AMENITY_RE}"]({bbox});
+  way["healthcare"]({bbox});
+  relation["healthcare"]({bbox});
+  way["tourism"~"{AREA_INFILL_TOURISM_RE}"]({bbox});
+  relation["tourism"~"{AREA_INFILL_TOURISM_RE}"]({bbox});
+  way["historic"~"{AREA_INFILL_HISTORIC_RE}"]({bbox});
+  relation["historic"~"{AREA_INFILL_HISTORIC_RE}"]({bbox});
+  way["place"="city_block"]({bbox});
+  relation["place"="city_block"]({bbox});
+  way["man_made"~"{AREA_INFILL_MAN_MADE_RE}"]({bbox});
+  relation["man_made"~"{AREA_INFILL_MAN_MADE_RE}"]({bbox});
+  way["office"]({bbox});
+  relation["office"]({bbox});
 );
 out body geom;
 """.strip()
+
+
+def _osm_cache_key(south: float, west: float, north: float, east: float) -> str:
+    query = overpass_query(south, west, north, east, timeout_s=0)
+    return hashlib.sha256(query.encode("utf-8")).hexdigest()
+
+
+def _osm_cache_path(key: str) -> Path:
+    return OSM_CACHE_DIR / f"{key}.json"
+
+
+def _load_osm_cache(key: str) -> dict[str, Any] | None:
+    path = _osm_cache_path(key)
+    if not path.exists() or path.stat().st_size <= 0:
+        return None
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            cached = json.load(f)
+    except (OSError, ValueError):
+        return None
+    return cached if isinstance(cached, dict) else None
+
+
+def _save_osm_cache(key: str, data: dict[str, Any]) -> None:
+    OSM_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    path = _osm_cache_path(key)
+    tmp = path.with_suffix(".tmp")
+    try:
+        with tmp.open("w", encoding="utf-8") as f:
+            json.dump(data, f)
+        tmp.replace(path)
+    except OSError:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def fetch_osm_json(
@@ -91,6 +157,11 @@ def fetch_osm_json(
     read_timeout_s: int = 120,
 ) -> dict[str, Any]:
     query = overpass_query(south, west, north, east, timeout_s=overpass_timeout_s)
+    cache_key = _osm_cache_key(south, west, north, east)
+    cached = _load_osm_cache(cache_key)
+    if cached is not None:
+        return cached
+
     urls = [overpass_url]
     if overpass_url == DEFAULT_OVERPASS_URL:
         urls.extend(url for url in FALLBACK_OVERPASS_URLS if url not in urls)
@@ -107,7 +178,10 @@ def fetch_osm_json(
                 excerpt = " ".join(response.text.split())[:320]
                 errors.append(f"{url}: HTTP {response.status_code} {excerpt}")
                 continue
-            return response.json()
+            data = response.json()
+            if isinstance(data, dict):
+                _save_osm_cache(cache_key, data)
+            return data
         except requests.RequestException as exc:
             errors.append(f"{url}: {exc}")
         except ValueError as exc:
@@ -290,7 +364,7 @@ def classify(tags: dict[str, Any], is_closed: bool) -> str | None:
         return "coastline"
     if tags.get("natural") in {"water", "bay", "strait"} or "water" in tags:
         return "water"
-    if tags.get("waterway") in {"river", "stream", "canal", "ditch", "drain"}:
+    if tags.get("waterway") in {"river", "stream", "canal", "ditch", "drain", "riverbank"}:
         return "water"
     if is_closed and tags.get("barrier") in {"hedge", "planter"}:
         return "green"
@@ -311,6 +385,8 @@ def classify(tags: dict[str, Any], is_closed: bool) -> str | None:
         return "green"
     if tags.get("natural") == "wetland" or tags.get("boundary") == "protected_area":
         return "green"
+    if _is_area_infill(tags, is_closed):
+        return "area_infill"
     return None
 
 
@@ -326,6 +402,54 @@ def _is_surface_parking(tags: dict[str, Any]) -> bool:
     if str(tags.get("parking:condition", "")).lower() == "covered":
         return False
     return True
+
+
+def _is_area_infill(tags: dict[str, Any], is_closed: bool) -> bool:
+    if not is_closed:
+        return False
+    if tags.get("area") == "no":
+        return False
+    if tags.get("landuse") in {
+        "residential", "industrial", "commercial", "retail", "garages", "depot", "railway",
+        "brownfield", "construction", "military", "education", "institutional", "civic_admin",
+        "religious",
+    }:
+        return True
+    if tags.get("amenity") in {
+        "hospital", "clinic", "school", "university", "college", "kindergarten", "public_building",
+        "townhall", "police", "fire_station", "prison", "marketplace", "place_of_worship",
+        "community_centre",
+    }:
+        return True
+    if "healthcare" in tags:
+        return True
+    if tags.get("tourism") in {"theme_park", "attraction", "museum", "hotel"}:
+        return True
+    if tags.get("historic") in {"district", "yes", "archaeological_site", "monument", "castle"}:
+        return True
+    if tags.get("place") == "city_block":
+        return True
+    if tags.get("man_made") in {"works", "industrial"}:
+        return True
+    if "office" in tags:
+        return True
+    return False
+
+
+def _closed_way_should_be_polygon(layer: str, tags: dict[str, str], is_closed: bool) -> bool:
+    if not is_closed:
+        return False
+    if layer != "water":
+        return layer in {"building", "green", "parking", "airport", "area_infill"}
+    if str(tags.get("area", "")).lower() == "yes":
+        return True
+    if tags.get("waterway") == "riverbank":
+        return True
+    if tags.get("natural") in {"water", "bay", "strait"}:
+        return True
+    if "water" in tags:
+        return True
+    return False
 
 
 def _lonlat_from_geometry(raw_geom: list[dict[str, Any]]) -> list[tuple[float, float]]:
@@ -537,7 +661,9 @@ def parse_osm_features(osm_json: dict[str, Any], projection: LocalProjection) ->
         tags = {str(k): str(v) for k, v in (element.get("tags") or {}).items()}
         if element_type == "relation":
             layer = classify(tags, is_closed=True)
-            if layer in {"water", "green", "building", "parking", "airport"}:
+            if layer in {"green", "building", "parking", "airport", "area_infill"} or (
+                layer == "water" and _closed_way_should_be_polygon("water", tags, is_closed=True)
+            ):
                 for poly in _polygons_from_relation(element, projection, clip):
                     features.append(OSMFeature(layer=layer, geometry_m=poly, tags=tags, osm_id=f"relation/{element.get('id', 'unknown')}"))
             continue
@@ -560,7 +686,7 @@ def parse_osm_features(osm_json: dict[str, Any], projection: LocalProjection) ->
             if layer == "coastline":
                 coastlines.append(LineString(local_coords))
                 continue
-            if layer in {"building", "water", "green", "parking", "airport"} and is_closed:
+            if _closed_way_should_be_polygon(layer, tags, is_closed):
                 geom: BaseGeometry = Polygon(local_coords)
             else:
                 geom = LineString(local_coords)

@@ -2,9 +2,53 @@
 
 All notable changes to TopoTile Studio are recorded here.
 
-Time zone: local macOS time on 2026-06-29. Some early entries are reconstructed from request order, screenshots, backup names, and file modification times.
+Time zone: local macOS time. Some early entries are reconstructed from request order, screenshots, backup names, and file modification times.
+
+## 2026-06-30
+
+### 08:50 - OSM and Elevation Data Cache
+
+- Added shared OSM Overpass response caching under `data/cache/osm/`.
+- Added Open-Meteo elevation response caching under `data/cache/elevation/open_meteo/`.
+- Existing large-map terrain tile caching remains under `data/cache/terrain_tiles/`.
+- Reusing the same map area and terrain sampling points now avoids repeated API downloads when the cache has not been cleared.
+- Expanded cache status and cleanup controls to show and optionally clear OSM, elevation, and terrain tile caches separately.
+- Added regression tests for OSM cache hits, Open-Meteo cache hits, and cache cleanup behavior.
+
+### 07:51 - Area Infill Modes
+
+- Replaced the previous footprint-cutout infill behavior with explicit area-level modes.
+- Added `Area infill mode` in the UI and project JSON.
+- `No-building areas` is now the default: if a broad area contains any mapped building, the whole area is skipped.
+- `All area polygons` generates the full broad-area polygon even when buildings exist inside it.
+- Verified the Nantong Tianhong Garden data: 477 of 570 candidate area polygons are skipped in default mode because they already contain buildings.
+- Added regression tests for both area-level skip mode and full polygon mode.
+
+### 00:05 - Area Infill Building Priority Fix
+
+- Fixed area infill overlapping building footprints after projection and simplification.
+- Changed area infill cleanup to subtract explicit features in final model millimeter coordinates before extrusion.
+- Added a small building safety clearance so broad-area fill leaves mapped buildings completely reserved.
+- Verified the Nantong Tianhong Garden project data: area infill/building overlap is now `0.0 mm²`.
+- Added a regression assertion that area infill top faces do not intersect building footprints.
 
 ## 2026-06-29
+
+### 23:28 - Broad Area Infill Layer
+
+- Added an `Area infill` layer enabled by default for broad OSM area tags that often represent districts or facility zones rather than individual buildings.
+- Added `Area infill height, mm`, defaulting to `0.40 mm`, so the low fill layer can be adjusted independently from parking lots.
+- Extended OSM fetching and parsing for broad area tags including residential/industrial/commercial landuse, hospitals, schools, healthcare sites, theme parks, historic districts, city blocks, works, and office areas.
+- Area infill now subtracts existing buildings, roads, water, green areas, parking, and airport pavement before generating, so real mapped objects remain intact and only leftover empty area is filled.
+- Added regression coverage for defaults, saved parameter parsing, Overpass query coverage, broad-area classification, and mesh cutouts around explicit features.
+
+### 22:54 - Closed River Ring Water/Land Fix
+
+- Fixed closed `waterway=river|canal|stream|ditch|drain` ways being treated as filled water polygons.
+- Closed linear waterways are now buffered as waterways instead of filling the enclosed land area.
+- Kept true water-area tags such as `natural=water`, `water=*`, `waterway=riverbank`, and `area=yes` as filled water polygons.
+- Verified the Nantong Tianhong Garden project using saved OSM data: the closed Hao River way is now parsed as a line, preventing the surrounded urban land from being covered by water.
+- Added regression coverage so closed river rings do not erase land/building/green layers in similar four-sided-water areas.
 
 ### 22:36 - Automatic Mesh Repair for Non-Manifold Edges
 

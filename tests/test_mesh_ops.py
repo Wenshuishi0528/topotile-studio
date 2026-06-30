@@ -70,7 +70,7 @@ def test_airport_layer_uses_parking_thickness_for_runway_lines():
         osm_id="way/runway",
     )
 
-    parts = build_surface_layer_meshes([], [], [], [], [runway], scaler, terrain, params)
+    parts = build_surface_layer_meshes([], [], [], [], [runway], [], [], scaler, terrain, params)
     airport = next(part for part in parts if part.name == "airport")
 
     assert not airport.is_empty()
@@ -91,11 +91,105 @@ def test_green_surface_follows_terrain_relief():
         osm_id="way/green-slope",
     )
 
-    parts = build_surface_layer_meshes([], [], [green_feature], [], [], scaler, terrain, params)
+    parts = build_surface_layer_meshes([], [], [green_feature], [], [], [], [], scaler, terrain, params)
     green = next(part for part in parts if part.name == "green")
 
     assert not green.is_empty()
     assert float(np.ptp(green.vertices[:, 2])) > 5.5
+
+
+def _top_surface(part):
+    top_z = float(part.vertices[:, 2].max())
+    top_tris = []
+    for face in part.faces:
+        tri = part.vertices[face]
+        if np.allclose(tri[:, 2], top_z):
+            top_tris.append(Polygon([(float(x), float(y)) for x, y, _ in tri]))
+    return top_z, unary_union(top_tris)
+
+
+def test_area_infill_empty_area_mode_skips_whole_polygons_with_buildings():
+    params = ModelParams(south=0.0, west=0.0, north=0.01, east=0.01, area_infill_height_mm=0.40)
+    scaler = ModelScaler(scale_mm_per_m=1.0, width_mm=60.0, height_mm=60.0)
+    terrain = TerrainGrid(
+        x_mm=np.asarray([[0.0, 60.0], [0.0, 60.0]]),
+        y_mm=np.asarray([[0.0, 0.0], [60.0, 60.0]]),
+        z_mm=np.full((2, 2), 3.0),
+    )
+    occupied_area = OSMFeature(
+        layer="area_infill",
+        geometry_m=Polygon([(0.0, 0.0), (20.0, 0.0), (20.0, 20.0), (0.0, 20.0)]),
+        tags={"landuse": "residential"},
+        osm_id="way/occupied-area",
+    )
+    empty_area = OSMFeature(
+        layer="area_infill",
+        geometry_m=Polygon([(30.0, 30.0), (50.0, 30.0), (50.0, 50.0), (30.0, 50.0)]),
+        tags={"landuse": "industrial"},
+        osm_id="way/empty-area",
+    )
+    building = OSMFeature(
+        layer="building",
+        geometry_m=Polygon([(8.0, 8.0), (14.0, 8.0), (14.0, 14.0), (8.0, 14.0)]),
+        tags={"building": "yes"},
+        osm_id="way/building",
+    )
+
+    parts = build_surface_layer_meshes(
+        [],
+        [],
+        [],
+        [],
+        [],
+        [occupied_area, empty_area],
+        [building],
+        scaler,
+        terrain,
+        params,
+    )
+    area_part = next(part for part in parts if part.name == "area_infill")
+    top_z, top_surface = _top_surface(area_part)
+
+    assert math.isclose(top_z, 3.47, abs_tol=1e-6)
+    assert not top_surface.covers(Point(2.0, 2.0))
+    assert not top_surface.covers(Point(11.0, 11.0))
+    assert top_surface.covers(Point(40.0, 40.0))
+
+
+def test_area_infill_all_area_mode_generates_whole_polygons_even_with_buildings():
+    params = ModelParams(
+        south=0.0,
+        west=0.0,
+        north=0.01,
+        east=0.01,
+        area_infill_height_mm=0.40,
+        area_infill_mode="all_areas",
+    )
+    scaler = ModelScaler(scale_mm_per_m=1.0, width_mm=60.0, height_mm=60.0)
+    terrain = TerrainGrid(
+        x_mm=np.asarray([[0.0, 60.0], [0.0, 60.0]]),
+        y_mm=np.asarray([[0.0, 0.0], [60.0, 60.0]]),
+        z_mm=np.full((2, 2), 3.0),
+    )
+    area = OSMFeature(
+        layer="area_infill",
+        geometry_m=Polygon([(0.0, 0.0), (30.0, 0.0), (30.0, 30.0), (0.0, 30.0)]),
+        tags={"landuse": "residential"},
+        osm_id="way/area",
+    )
+    building = OSMFeature(
+        layer="building",
+        geometry_m=Polygon([(8.0, 8.0), (14.0, 8.0), (14.0, 14.0), (8.0, 14.0)]),
+        tags={"building": "yes"},
+        osm_id="way/building",
+    )
+
+    parts = build_surface_layer_meshes([], [], [], [], [], [area], [building], scaler, terrain, params)
+    area_part = next(part for part in parts if part.name == "area_infill")
+    _, top_surface = _top_surface(area_part)
+
+    assert top_surface.covers(Point(2.0, 2.0))
+    assert top_surface.covers(Point(11.0, 11.0))
 
 
 def test_road_line_densifies_over_terrain_peak():

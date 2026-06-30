@@ -53,11 +53,15 @@ def test_clear_cache_keeps_terrain_cache_when_not_selected(tmp_path, monkeypatch
     outputs = tmp_path / "outputs"
     cache = tmp_path / "cache"
     terrain = cache / "terrain_tiles"
-    for path in (jobs, outputs, terrain):
+    osm = cache / "osm"
+    elevation = cache / "elevation"
+    for path in (jobs, outputs, terrain, osm, elevation):
         path.mkdir(parents=True)
     (jobs / "status.json").write_text("{}", encoding="utf-8")
     (outputs / "city_model.3mf").write_text("model", encoding="utf-8")
     (terrain / "tile.tif").write_text("terrain", encoding="utf-8")
+    (osm / "query.json").write_text("{}", encoding="utf-8")
+    (elevation / "points.json").write_text("{}", encoding="utf-8")
 
     monkeypatch.setattr(main, "DATA_DIR", tmp_path)
     monkeypatch.setattr(main, "JOBS_DIR", jobs)
@@ -69,6 +73,35 @@ def test_clear_cache_keeps_terrain_cache_when_not_selected(tmp_path, monkeypatch
     assert result["removed_bytes"] > 0
     assert not any(jobs.iterdir())
     assert not any(outputs.iterdir())
+    assert (terrain / "tile.tif").exists()
+    assert (osm / "query.json").exists()
+    assert (elevation / "points.json").exists()
+
+
+def test_clear_cache_can_clear_osm_and_elevation_cache(tmp_path, monkeypatch):
+    jobs = tmp_path / "jobs"
+    outputs = tmp_path / "outputs"
+    cache = tmp_path / "cache"
+    terrain = cache / "terrain_tiles"
+    osm = cache / "osm"
+    elevation = cache / "elevation"
+    for path in (jobs, outputs, terrain, osm, elevation):
+        path.mkdir(parents=True)
+    (terrain / "tile.tif").write_text("terrain", encoding="utf-8")
+    (osm / "query.json").write_text("{}", encoding="utf-8")
+    (elevation / "points.json").write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr(main, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(main, "JOBS_DIR", jobs)
+    monkeypatch.setattr(main, "OUTPUTS_DIR", outputs)
+    monkeypatch.setattr(main, "CACHE_DIR", cache)
+
+    result = main.clear_cache({"generated": False, "terrain": False, "osm": True, "elevation": True})
+
+    assert "osm" in result["cleared"]
+    assert "elevation" in result["cleared"]
+    assert not any(osm.iterdir())
+    assert not any(elevation.iterdir())
     assert (terrain / "tile.tif").exists()
 
 

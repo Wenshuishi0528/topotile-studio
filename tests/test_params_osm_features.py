@@ -35,6 +35,27 @@ def test_model_params_airport_layer_defaults_on():
     assert params.include_airport is True
 
 
+def test_model_params_area_infill_defaults_on_with_04mm_height():
+    params = ModelParams.from_dict({"bbox": [47.62, -122.355, 47.626, -122.3455]})
+
+    assert params.include_area_infill is True
+    assert params.area_infill_height_mm == 0.40
+    assert params.area_infill_mode == "empty_areas"
+
+
+def test_model_params_accepts_area_infill_height_and_toggle():
+    params = ModelParams.from_dict({
+        "bbox": [47.62, -122.355, 47.626, -122.3455],
+        "area_infill_height_mm": "0.8",
+        "area_infill_mode": "all_areas",
+        "include_area_infill": "false",
+    })
+
+    assert params.area_infill_height_mm == 0.8
+    assert params.area_infill_mode == "all_areas"
+    assert params.include_area_infill is False
+
+
 def test_model_params_auto_repair_mesh_defaults_on_and_can_disable():
     params = ModelParams.from_dict({"bbox": [47.62, -122.355, 47.626, -122.3455]})
 
@@ -126,6 +147,49 @@ def test_parse_water_relation_members():
     assert water[0].geometry_m.area > 0
 
 
+def test_closed_waterway_river_is_line_not_filled_polygon():
+    projection = make_local_projection(47.0, -122.0, 47.01, -121.99)
+    ring = [
+        {"lon": -121.998, "lat": 47.002},
+        {"lon": -121.992, "lat": 47.002},
+        {"lon": -121.992, "lat": 47.008},
+        {"lon": -121.998, "lat": 47.008},
+        {"lon": -121.998, "lat": 47.002},
+    ]
+    osm_json = {
+        "elements": [
+            {
+                "type": "way",
+                "id": 101,
+                "tags": {"waterway": "river", "name": "Loop River"},
+                "geometry": ring,
+            },
+            {
+                "type": "way",
+                "id": 102,
+                "tags": {"waterway": "riverbank"},
+                "geometry": [
+                    {"lon": -121.997, "lat": 47.003},
+                    {"lon": -121.996, "lat": 47.003},
+                    {"lon": -121.996, "lat": 47.004},
+                    {"lon": -121.997, "lat": 47.004},
+                    {"lon": -121.997, "lat": 47.003},
+                ],
+            },
+        ]
+    }
+
+    features = parse_osm_features(osm_json, projection)
+    river = next(feature for feature in features if feature.osm_id == "way/101")
+    lake = next(feature for feature in features if feature.osm_id == "way/102")
+
+    assert river.layer == "water"
+    assert river.geometry_m.area == 0
+    assert river.geometry_m.length > 0
+    assert lake.layer == "water"
+    assert lake.geometry_m.area > 0
+
+
 def test_parse_building_part_way():
     projection = make_local_projection(47.0, -122.0, 47.01, -121.99)
     osm_json = {
@@ -210,6 +274,41 @@ def test_parse_landcover_as_green():
 
     assert len(features) == 1
     assert features[0].layer == "green"
+
+
+def test_parse_broad_area_tags_as_area_infill():
+    projection = make_local_projection(47.0, -122.0, 47.01, -121.99)
+
+    def square(osm_id, tags, lon_offset):
+        west = -121.999 + lon_offset
+        east = west + 0.0005
+        return {
+            "type": "way",
+            "id": osm_id,
+            "tags": tags,
+            "geometry": [
+                {"lon": west, "lat": 47.001},
+                {"lon": east, "lat": 47.001},
+                {"lon": east, "lat": 47.002},
+                {"lon": west, "lat": 47.002},
+                {"lon": west, "lat": 47.001},
+            ],
+        }
+
+    osm_json = {
+        "elements": [
+            square(6, {"historic": "district", "landuse": "residential", "place": "city_block", "tourism": "theme_park"}, 0.0000),
+            square(7, {"amenity": "hospital"}, 0.0010),
+            square(8, {"building": "yes", "landuse": "residential"}, 0.0020),
+        ]
+    }
+
+    features = parse_osm_features(osm_json, projection)
+    area_infill = [feature for feature in features if feature.layer == "area_infill"]
+    buildings = [feature for feature in features if feature.layer == "building"]
+
+    assert {feature.osm_id for feature in area_infill} == {"way/6", "way/7"}
+    assert {feature.osm_id for feature in buildings} == {"way/8"}
 
 
 def test_parse_hedge_and_low_planting_areas_as_green():

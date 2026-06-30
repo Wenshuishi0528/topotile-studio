@@ -20,7 +20,7 @@
     #map { height: 420px; width: 100%; }
     .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
     label { display: block; font-size: 12px; margin: 12px 0 4px; font-weight: 700; color: #344054; }
-    input, textarea { box-sizing: border-box; width: 100%; border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 13px; }
+    input, textarea, select { box-sizing: border-box; width: 100%; border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 13px; }
     textarea { min-height: 58px; resize: vertical; }
     button { border: 0; border-radius: 8px; padding: 10px 12px; cursor: pointer; font-weight: 700; }
     .primary { background: #2563eb; color: white; width: 100%; margin-top: 14px; }
@@ -170,6 +170,17 @@
       <label class="check"><input id="include_green" type="checkbox" checked> Green</label>
       <label class="check"><input id="include_parking" type="checkbox" checked> Parking</label>
       <label class="check"><input id="include_airport" type="checkbox" checked> Airport</label>
+      <label class="check"><input id="include_area_infill" type="checkbox" checked> Area infill</label>
+    </div>
+    <div class="row">
+      <div><label>Area infill height, mm</label><input id="area_infill_height_mm" type="number" value="0.40" min="0.05" max="10" step="0.05"></div>
+      <div>
+        <label>Area infill mode</label>
+        <select id="area_infill_mode">
+          <option value="empty_areas" selected>No-building areas</option>
+          <option value="all_areas">All area polygons</option>
+        </select>
+      </div>
     </div>
     <div class="small">Airport includes runways, taxiways, and aprons as a low layer with parking-lot thickness.</div>
     <div class="small">Cut out water removes lakes and ocean from the base so you can place colored material underneath.</div>
@@ -228,6 +239,8 @@
 
     <label>Maintenance</label>
     <div class="checks">
+      <label class="check"><input id="clear_osm_cache" type="checkbox"> Include OSM cache</label>
+      <label class="check"><input id="clear_elevation_cache" type="checkbox"> Include elevation cache</label>
       <label class="check"><input id="clear_terrain_cache" type="checkbox"> Include terrain cache</label>
     </div>
     <button class="secondary" id="clearCache" type="button">Clear cache</button>
@@ -702,16 +715,22 @@
 
   function applyProjectParams(saved) {
     const p = saved.params || saved;
-    const numericIds = ['south','west','north','east','max_size_mm','base_thickness_mm','vertical_exaggeration','terrain_grid_size','building_height_multiplier','max_building_height_mm','default_building_height_m','min_road_width_mm','footway_width_mm','pedestrian_width_mm','bridge_clearance_mm','max_terrain_height_mm','terrain_tile_zoom','osm_tile_size_km','road_cleaning_level','chunk_rows','chunk_cols'];
+    const numericIds = ['south','west','north','east','max_size_mm','base_thickness_mm','vertical_exaggeration','terrain_grid_size','building_height_multiplier','max_building_height_mm','default_building_height_m','min_road_width_mm','footway_width_mm','pedestrian_width_mm','bridge_clearance_mm','area_infill_height_mm','max_terrain_height_mm','terrain_tile_zoom','osm_tile_size_km','road_cleaning_level','chunk_rows','chunk_cols'];
     numericIds.forEach(id => {
       if (p[id] !== undefined && document.getElementById(id)) document.getElementById(id).value = p[id];
     });
-    const boolIds = ['large_map_mode','auto_terrain','include_buildings','include_roads','include_water','cut_out_water','include_green','include_parking','include_airport','chunk_export','auto_repair_mesh'];
+    const boolIds = ['large_map_mode','auto_terrain','include_buildings','include_roads','include_water','cut_out_water','include_green','include_parking','include_airport','include_area_infill','chunk_export','auto_repair_mesh'];
     boolIds.forEach(id => {
       if (p[id] !== undefined && document.getElementById(id)) document.getElementById(id).checked = Boolean(p[id]);
     });
     if (p.include_airport === undefined) document.getElementById('include_airport').checked = true;
+    if (p.include_area_infill === undefined) document.getElementById('include_area_infill').checked = true;
     if (p.auto_repair_mesh === undefined) document.getElementById('auto_repair_mesh').checked = true;
+    const areaInfillMode = document.getElementById('area_infill_mode');
+    if (areaInfillMode) {
+      areaInfillMode.value = p.area_infill_mode || 'empty_areas';
+      if (!areaInfillMode.value) areaInfillMode.value = 'empty_areas';
+    }
     if (p.output_name !== undefined) document.getElementById('output_name').value = p.output_name;
     if (p.dem_attribution !== undefined) document.getElementById('dem_attribution').value = p.dem_attribution;
     let mode = saved.selection_mode;
@@ -780,7 +799,7 @@
   updateTerrainModeStatus();
 
   function params() {
-    const ids = ['south','west','north','east','max_size_mm','base_thickness_mm','vertical_exaggeration','terrain_grid_size','building_height_multiplier','max_building_height_mm','default_building_height_m','min_road_width_mm','footway_width_mm','pedestrian_width_mm','bridge_clearance_mm','max_terrain_height_mm','terrain_tile_zoom','osm_tile_size_km','road_cleaning_level','chunk_rows','chunk_cols'];
+    const ids = ['south','west','north','east','max_size_mm','base_thickness_mm','vertical_exaggeration','terrain_grid_size','building_height_multiplier','max_building_height_mm','default_building_height_m','min_road_width_mm','footway_width_mm','pedestrian_width_mm','bridge_clearance_mm','area_infill_height_mm','max_terrain_height_mm','terrain_tile_zoom','osm_tile_size_km','road_cleaning_level','chunk_rows','chunk_cols'];
     const p = {};
     ids.forEach(id => p[id] = parseFloat(document.getElementById(id).value));
     p.large_map_mode = document.getElementById('large_map_mode').checked;
@@ -796,6 +815,8 @@
     p.include_green = document.getElementById('include_green').checked;
     p.include_parking = document.getElementById('include_parking').checked;
     p.include_airport = document.getElementById('include_airport').checked;
+    p.include_area_infill = document.getElementById('include_area_infill').checked;
+    p.area_infill_mode = document.getElementById('area_infill_mode').value;
     p.dem_attribution = document.getElementById('dem_attribution').value;
     p.output_name = document.getElementById('output_name').value.trim() || 'city_model';
     p.project_name = p.output_name;
@@ -822,6 +843,7 @@
         if (s.terrain) statusEl.textContent += `\nTerrain: ${s.terrain.source}, relief ${s.terrain.relief_mm.toFixed(1)} mm`;
         if (s.water_cutout && s.water_cutout.enabled) statusEl.textContent += `\nWater cutout: on (${s.water_cutout.polygons} polygons)`;
         if (s.selection_shape) statusEl.textContent += `\nSelection shape: ${s.selection_shape}`;
+        if (s.area_infill_mode) statusEl.textContent += `\nArea infill mode: ${s.area_infill_mode}`;
         if (s.osm_tile_count) statusEl.textContent += `\nOSM tiles: ${s.osm_tile_count}`;
         statusEl.textContent += `\nFeatures: ${JSON.stringify(s.features)}`;
         if (s.selected_road_levels) statusEl.textContent += `\nRoad levels: ${s.selected_road_levels.join(', ') || 'none'}`;
@@ -943,7 +965,7 @@
       const res = await fetch('/api/cache/status');
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'Cache status failed');
-      statusEl.textContent = `Generated files: ${formatBytes(data.jobs_bytes + data.outputs_bytes)}. Terrain cache: ${formatBytes(data.terrain_cache_bytes)}.`;
+      statusEl.textContent = `Generated files: ${formatBytes(data.jobs_bytes + data.outputs_bytes)}. OSM cache: ${formatBytes(data.osm_cache_bytes)}. Elevation cache: ${formatBytes(data.elevation_cache_bytes)}. Terrain cache: ${formatBytes(data.terrain_cache_bytes)}.`;
     } catch (err) {
       statusEl.textContent = `Cache status failed: ${err.message}`;
     }
@@ -958,6 +980,8 @@
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({
           generated: true,
+          osm: document.getElementById('clear_osm_cache').checked,
+          elevation: document.getElementById('clear_elevation_cache').checked,
           terrain: document.getElementById('clear_terrain_cache').checked,
         }),
       });
@@ -971,7 +995,7 @@
         document.getElementById('downloadChunks').classList.add('disabled');
         document.getElementById('preview').removeAttribute('src');
       }
-      statusEl.textContent = `Cleared ${data.cleared.join(', ') || 'nothing'}: ${formatBytes(data.removed_bytes)} removed. Generated files now ${formatBytes(data.after.jobs_bytes + data.after.outputs_bytes)}, terrain cache ${formatBytes(data.after.terrain_cache_bytes)}.`;
+      statusEl.textContent = `Cleared ${data.cleared.join(', ') || 'nothing'}: ${formatBytes(data.removed_bytes)} removed. Generated files now ${formatBytes(data.after.jobs_bytes + data.after.outputs_bytes)}, OSM cache ${formatBytes(data.after.osm_cache_bytes)}, elevation cache ${formatBytes(data.after.elevation_cache_bytes)}, terrain cache ${formatBytes(data.after.terrain_cache_bytes)}.`;
     } catch (err) {
       statusEl.textContent = `Clear failed: ${err.message}`;
     }

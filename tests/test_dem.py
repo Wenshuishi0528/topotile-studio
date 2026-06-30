@@ -1,5 +1,7 @@
 import numpy as np
+import pytest
 
+from city_modeler import dem
 from city_modeler.dem import TerrainGrid, fetch_open_meteo_elevations, lonlat_to_tile, make_auto_elevation_terrain, make_terrain
 from city_modeler.geo import make_local_projection, make_scaler
 from city_modeler.params import ModelParams
@@ -13,6 +15,11 @@ class FakeResponse:
 
     def json(self):
         return {"elevation": self._elevations}
+
+
+@pytest.fixture(autouse=True)
+def isolate_open_meteo_cache(tmp_path, monkeypatch):
+    monkeypatch.setattr(dem, "OPEN_METEO_CACHE", tmp_path / "open_meteo")
 
 
 def test_fetch_open_meteo_elevations_batches_100_points(monkeypatch):
@@ -32,6 +39,25 @@ def test_fetch_open_meteo_elevations_batches_100_points(monkeypatch):
     assert len(elevations) == 101
     assert elevations[0] == 1.0
     assert elevations[-1] == 2.0
+
+
+def test_fetch_open_meteo_elevations_reuses_cache(monkeypatch):
+    calls = []
+
+    def fake_get(url, params, headers, timeout):
+        count = len(params["latitude"].split(","))
+        calls.append(count)
+        return FakeResponse([42.0] * count)
+
+    monkeypatch.setattr("requests.get", fake_get)
+
+    lonlat = [(-122.0, 47.0), (-121.999, 47.001)]
+    first = fetch_open_meteo_elevations(lonlat)
+    second = fetch_open_meteo_elevations(lonlat)
+
+    assert first == [42.0, 42.0]
+    assert second == first
+    assert calls == [2]
 
 
 def test_lonlat_to_tile_is_stable_for_known_coordinate():

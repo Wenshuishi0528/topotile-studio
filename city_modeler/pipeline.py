@@ -247,6 +247,7 @@ def generate_model(
     green = [f for f in features if f.layer == "green"]
     parking = [f for f in features if f.layer == "parking"]
     airport = [f for f in features if f.layer == "airport"]
+    area_infill = [f for f in features if f.layer == "area_infill"]
 
     water_cutouts = water_cutout_polygons_mm(water, scaler, params) if params.cut_out_water else []
     terrain_part = terrain_to_mesh(terrain, cutouts_mm=water_cutouts, footprint_mm=footprint_mm)
@@ -258,8 +259,19 @@ def generate_model(
         if not building_part.is_empty():
             parts.append(building_part)
 
-    _progress(progress, "Building roads, water, green, parking, and airport layers", 0.70)
-    parts.extend(build_surface_layer_meshes(roads, water, green, parking, airport, scaler, terrain, params))
+    _progress(progress, "Building roads, water, green, parking, airport, and area infill layers", 0.70)
+    parts.extend(build_surface_layer_meshes(
+        roads,
+        water,
+        green,
+        parking,
+        airport,
+        area_infill,
+        buildings,
+        scaler,
+        terrain,
+        params,
+    ))
     parts = [p.cleaned() for p in parts if not p.cleaned().is_empty()]
 
     if not parts:
@@ -298,6 +310,7 @@ def generate_model(
         },
         "large_map_mode": params.large_map_mode,
         "selection_shape": params.selection_shape,
+        "area_infill_mode": params.area_infill_mode,
         "road_cleaning_level": params.road_cleaning_level,
         "water_cutout": {
             "enabled": params.cut_out_water,
@@ -313,6 +326,7 @@ def generate_model(
             "green": len(green),
             "parking": len(parking),
             "airport": len(airport),
+            "area_infill": len(area_infill),
         },
         "selected_road_levels": params.road_levels,
         "mesh_parts": [

@@ -26,6 +26,7 @@ COLORS = {
     "green": (80, 160, 90, 255),
     "parking": (168, 168, 156, 255),
     "airport": (168, 168, 156, 255),
+    "area_infill": (176, 164, 138, 255),
 }
 
 
@@ -878,6 +879,8 @@ def build_surface_layer_meshes(
     green_features: list[OSMFeature],
     parking_features: list[OSMFeature],
     airport_features: list[OSMFeature],
+    area_infill_features: list[OSMFeature],
+    building_features: list[OSMFeature],
     scaler: ModelScaler,
     terrain: TerrainGrid,
     params: ModelParams,
@@ -888,11 +891,15 @@ def build_surface_layer_meshes(
     green_polys = _feature_polygons(green_features)
     parking_polys = _feature_polygons(parking_features)
     airport_polys = _feature_polygons(airport_features) + _buffer_feature_lines(airport_features, scaler, params, "airport")
+    area_infill_polys = _feature_polygons(area_infill_features)
+    building_polys = _feature_polygons(building_features)
 
     water_union = unary_union(water_polys) if water_polys else None
     road_cutout_union = unary_union(_buffer_feature_lines(road_features, scaler, params, "road")) if road_features else None
+    green_union = unary_union(green_polys) if green_polys else None
     parking_union = unary_union(parking_polys) if parking_polys else None
     airport_union = unary_union(airport_polys) if airport_polys else None
+    building_union = unary_union(building_polys) if building_polys else None
 
     cleaned_parking: list[Polygon] = []
     for pp in parking_polys:
@@ -927,6 +934,25 @@ def build_surface_layer_meshes(
         cleaned_green.extend(list(iter_polygons(geom)))
 
     surface_tol_mm = min(params.simplify_tolerance_mm, 0.03)
+    if params.include_area_infill:
+        selected_area_infill = list(area_infill_polys)
+        if params.area_infill_mode == "empty_areas" and building_union is not None and not building_union.is_empty:
+            selected_area_infill = [
+                poly
+                for poly in selected_area_infill
+                if poly.intersection(building_union).area <= 1e-6
+            ]
+        parts.append(make_layer_mesh(
+            "area_infill",
+            selected_area_infill,
+            scaler,
+            terrain,
+            params,
+            thickness_mm=params.area_infill_height_mm,
+            z_offset_mm=0.07,
+            color=COLORS["area_infill"],
+            simplify_tolerance_mm=surface_tol_mm,
+        ))
     if params.include_green:
         parts.append(make_layer_mesh("green", cleaned_green, scaler, terrain, params, thickness_mm=0.25, z_offset_mm=0.05, color=COLORS["green"], simplify_tolerance_mm=surface_tol_mm))
     if params.include_parking:

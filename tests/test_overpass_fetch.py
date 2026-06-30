@@ -1,6 +1,12 @@
 import requests
+import pytest
 
 from city_modeler import osm
+
+
+@pytest.fixture(autouse=True)
+def isolate_osm_cache(tmp_path, monkeypatch):
+    monkeypatch.setattr(osm, "OSM_CACHE_DIR", tmp_path / "osm")
 
 
 class FakeResponse:
@@ -29,6 +35,22 @@ def test_fetch_osm_json_sends_user_agent(monkeypatch):
     assert calls[0]["headers"]["Accept"] == "application/json"
 
 
+def test_fetch_osm_json_reuses_cached_query(monkeypatch):
+    calls = []
+
+    def fake_post(url, data, headers, timeout):
+        calls.append({"url": url, "data": data})
+        return FakeResponse(200, {"elements": [{"type": "way", "id": 1}]})
+
+    monkeypatch.setattr(requests, "post", fake_post)
+
+    first = osm.fetch_osm_json(47.62, -122.355, 47.626, -122.3455)
+    second = osm.fetch_osm_json(47.62, -122.355, 47.626, -122.3455)
+
+    assert first == second
+    assert len(calls) == 1
+
+
 def test_overpass_query_includes_building_parts_and_green_relations():
     query = osm.overpass_query(47.62, -122.355, 47.626, -122.3455)
 
@@ -47,6 +69,14 @@ def test_overpass_query_includes_building_parts_and_green_relations():
     assert 'way["man_made"="planter"]' in query
     assert 'shrubbery' in query
     assert 'plant_nursery' in query
+    assert 'way["landuse"~"residential|industrial|commercial|retail' in query
+    assert 'relation["landuse"~"residential|industrial|commercial|retail' in query
+    assert 'way["amenity"~"hospital|clinic|school|university' in query
+    assert 'relation["healthcare"]' in query
+    assert 'way["tourism"~"theme_park|attraction|museum|hotel"]' in query
+    assert 'relation["historic"~"district|yes|archaeological_site|monument|castle"]' in query
+    assert 'way["place"="city_block"]' in query
+    assert 'way["office"]' in query
 
 
 def test_fetch_osm_json_falls_back_from_default_endpoint(monkeypatch):

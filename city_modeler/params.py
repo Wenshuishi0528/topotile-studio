@@ -21,6 +21,7 @@ ROAD_LEVELS = [
     "steps",
 ]
 SELECTION_SHAPES = ["rectangle", "circle", "hexagon"]
+AREA_INFILL_MODES = ["empty_areas", "all_areas"]
 DEFAULT_ROAD_LEVELS = [
     "motorway",
     "trunk",
@@ -65,6 +66,7 @@ class ModelParams:
     footway_width_mm: float = 0.60
     pedestrian_width_mm: float = 0.60
     bridge_clearance_mm: float = 2.5
+    area_infill_height_mm: float = 0.40
     terrain_grid_size: int = 96
     max_terrain_height_mm: float = 35.0
     simplify_tolerance_mm: float = 0.15
@@ -86,12 +88,14 @@ class ModelParams:
     include_green: bool = True
     include_parking: bool = True
     include_airport: bool = True
+    include_area_infill: bool = True
 
     osm_overpass_url: str = "https://overpass-api.de/api/interpreter"
     road_levels: list[str] = field(default_factory=lambda: list(DEFAULT_ROAD_LEVELS))
     dem_attribution: str = ""
     project_name: str = "TopoTile Studio City Tile"
     output_name: str = "city_model"
+    area_infill_mode: str = "empty_areas"
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ModelParams":
@@ -116,13 +120,15 @@ class ModelParams:
             "vertical_exaggeration", "building_height_multiplier", "default_building_height_m",
             "level_height_m", "min_building_height_mm", "max_building_height_mm",
             "min_road_width_mm", "footway_width_mm", "pedestrian_width_mm", "bridge_clearance_mm",
+            "area_infill_height_mm",
             "max_terrain_height_mm", "simplify_tolerance_mm",
             "osm_tile_size_km",
         }
         int_fields = {"terrain_grid_size", "terrain_tile_zoom", "road_cleaning_level", "chunk_rows", "chunk_cols"}
         bool_fields = {
             "auto_terrain", "large_map_mode", "cut_out_water", "chunk_export", "auto_repair_mesh",
-            "include_buildings", "include_roads", "include_water", "include_green", "include_parking", "include_airport"
+            "include_buildings", "include_roads", "include_water", "include_green", "include_parking",
+            "include_airport", "include_area_infill"
         }
 
         for key in numeric_fields & filtered.keys():
@@ -137,6 +143,8 @@ class ModelParams:
                 filtered[key] = bool(value)
         if "selection_shape" in filtered:
             filtered["selection_shape"] = str(filtered["selection_shape"]).strip().lower()
+        if "area_infill_mode" in filtered:
+            filtered["area_infill_mode"] = str(filtered["area_infill_mode"]).strip().lower()
         if "road_levels" in filtered:
             value = filtered["road_levels"]
             if isinstance(value, str):
@@ -171,8 +179,12 @@ class ModelParams:
             raise ValueError("pedestrian_width_mm must be between 0.15 and 10.")
         if self.bridge_clearance_mm < 0 or self.bridge_clearance_mm > 30:
             raise ValueError("bridge_clearance_mm must be between 0 and 30.")
+        if self.area_infill_height_mm < 0.05 or self.area_infill_height_mm > 10:
+            raise ValueError("area_infill_height_mm must be between 0.05 and 10.")
         if self.selection_shape not in SELECTION_SHAPES:
             raise ValueError(f"selection_shape must be one of: {', '.join(SELECTION_SHAPES)}")
+        if self.area_infill_mode not in AREA_INFILL_MODES:
+            raise ValueError(f"area_infill_mode must be one of: {', '.join(AREA_INFILL_MODES)}")
         if self.road_cleaning_level < 0 or self.road_cleaning_level > 3:
             raise ValueError("road_cleaning_level must be between 0 and 3.")
         if self.chunk_rows < 1 or self.chunk_rows > 6:
