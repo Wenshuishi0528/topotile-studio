@@ -510,6 +510,116 @@ def _add_boundary_sides_from_top_faces(
         faces.append((a, bottom_b, bottom_a))
 
 
+def _sample_building_bottom_points(poly: Polygon, terrain: TerrainGrid) -> list[tuple[float, float]]:
+    spacing = _terrain_spacing_mm(terrain)
+    max_step = max(0.5, spacing)
+    points: list[tuple[float, float]] = []
+    exterior = _densify_ring_xy(poly.exterior.coords, max_step)
+    points.extend(exterior[:-1])
+    for ring in poly.interiors:
+        hole = _densify_ring_xy(ring.coords, max_step)
+        points.extend(hole[:-1])
+    points.extend(_terrain_points_inside_polygon(poly, terrain, max_points=1500))
+    return _dedupe_xy(points)
+
+
+def _building_roof_z(bottom_z: list[float], height_mm: float) -> float:
+    if not bottom_z:
+        return height_mm
+    bottom = np.asarray(bottom_z, dtype=float)
+    baseline = float(np.median(bottom))
+    min_wall_height = min(1.0, max(0.25, height_mm * 0.15))
+    return max(baseline + height_mm, float(np.max(bottom)) + min_wall_height)
+
+
+def _add_building_terrain_triangle(
+    vertices: list[tuple[float, float, float]],
+    faces: list[tuple[int, int, int]],
+    cache: VertexCache,
+    top_faces: list[tuple[int, int, int]],
+    top_to_bottom: dict[int, int],
+    coords: list[tuple[float, float]],
+    terrain: TerrainGrid,
+    roof_z: float,
+) -> None:
+    if len(coords) < 3:
+        return
+    tri = coords[:3]
+    area = _signed_area(tri + [tri[0]])
+    if abs(area) <= 1e-12:
+        return
+    bottom = [terrain.sample_z(x, y) for x, y in tri]
+    top_idx = [_vertex_id(vertices, cache, x, y, roof_z) for x, y in tri]
+    bottom_idx = [_vertex_id(vertices, cache, x, y, z) for (x, y), z in zip(tri, bottom)]
+    for top_vertex, bottom_vertex in zip(top_idx, bottom_idx):
+        top_to_bottom[top_vertex] = bottom_vertex
+    if area >= 0:
+        top_face = (top_idx[0], top_idx[1], top_idx[2])
+        faces.append(top_face)
+        top_faces.append(top_face)
+        faces.append((bottom_idx[0], bottom_idx[2], bottom_idx[1]))
+    else:
+        top_face = (top_idx[0], top_idx[2], top_idx[1])
+        faces.append(top_face)
+        top_faces.append(top_face)
+        faces.append((bottom_idx[0], bottom_idx[1], bottom_idx[2]))
+
+
+def extrude_building_on_terrain(
+    poly: Polygon,
+    terrain: TerrainGrid,
+    height_mm: float,
+    name: str,
+    color: tuple[int, int, int, int],
+) -> MeshPart:
+    poly = _clean_polygon(poly)  # type: ignore[assignment]
+    if poly is None or height_mm <= 0:
+        return MeshPart(name, np.zeros((0, 3)), np.zeros((0, 3), dtype=np.int64), color)
+    if not _terrain_has_relief(terrain):
+        point = poly.representative_point()
+        z0 = terrain.sample_z(point.x, point.y)
+        return extrude_polygon(poly, z0, z0 + height_mm, name, color)
+
+    points = _sample_building_bottom_points(poly, terrain)
+    if len(points) < 3:
+        point = poly.representative_point()
+        z0 = terrain.sample_z(point.x, point.y)
+        return extrude_polygon(poly, z0, z0 + height_mm, name, color)
+
+    bottom_z = [terrain.sample_z(x, y) for x, y in points]
+    roof_z = _building_roof_z(bottom_z, height_mm)
+
+    try:
+        candidates = triangulate(MultiPoint(points))
+    except Exception:
+        candidates = []
+    if not candidates:
+        candidates = _triangulate_polygon(poly)
+
+    vertices: list[tuple[float, float, float]] = []
+    faces: list[tuple[int, int, int]] = []
+    cache: VertexCache = {}
+    top_faces: list[tuple[int, int, int]] = []
+    top_to_bottom: dict[int, int] = {}
+    for candidate in candidates:
+        if candidate.is_empty or candidate.area <= 1e-9:
+            continue
+        try:
+            clipped = candidate.intersection(poly)
+        except Exception:
+            continue
+        for piece in iter_polygons(clipped):
+            for tri in _triangulate_polygon(piece):
+                coords = [(float(x), float(y)) for x, y in list(tri.exterior.coords)[:3]]
+                _add_building_terrain_triangle(vertices, faces, cache, top_faces, top_to_bottom, coords, terrain, roof_z)
+
+    _add_boundary_sides_from_top_faces(faces, top_faces, top_to_bottom)
+
+    if not faces:
+        return MeshPart(name, np.zeros((0, 3)), np.zeros((0, 3), dtype=np.int64), color)
+    return MeshPart(name, np.asarray(vertices, dtype=float), np.asarray(faces, dtype=np.int64), color).cleaned()
+
+
 def extrude_polygon_on_terrain(
     poly: Polygon,
     terrain: TerrainGrid,
@@ -684,12 +794,10 @@ def build_building_meshes(features: list[OSMFeature], scaler: ModelScaler, terra
             poly = transform_polygon_to_mm(poly_m, scaler, tol_m)
             if poly is None:
                 continue
-            centroid = poly.representative_point()
-            z0 = terrain.sample_z(centroid.x, centroid.y)
             h_m = parse_height_m(feature.tags, params)
             h_mm = h_m * scaler.scale_mm_per_m * params.building_height_multiplier
             h_mm = float(np.clip(h_mm, params.min_building_height_mm, params.max_building_height_mm))
-            parts.append(extrude_polygon(poly, z0, z0 + h_mm, "building", COLORS["buildings"]))
+            parts.append(extrude_building_on_terrain(poly, terrain, h_mm, "building", COLORS["buildings"]))
     return merge_parts("buildings", parts, COLORS["buildings"])
 
 

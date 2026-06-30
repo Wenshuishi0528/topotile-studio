@@ -6,6 +6,20 @@ Time zone: local macOS time. Some early entries are reconstructed from request o
 
 ## 2026-06-30
 
+### 14:45 - Terrain-Fitted Building Bases
+
+- Changed terrain-mode building extrusion so building bottoms follow sampled terrain instead of using one flat centroid height.
+- Kept building roofs flat by using one roof plane per building.
+- Used a median-terrain roof baseline with a minimum high-side wall height so steep slopes avoid floating without excessively inflating normal building height.
+- Bumped the app version to `v0.30.0`.
+- Added regression coverage for slope buildings with terrain-following bases, flat roofs, and clean mesh diagnostics.
+
+### 14:14 - App Version Label
+
+- Set the current application version to `v0.29.0`.
+- Added the version number as a small label next to the TopoTile Studio title in the web app.
+- Added `app_version` to saved project JSON files while keeping the existing project schema version unchanged.
+
 ### 13:17 - Adjustable Map Preview Layout and Keyboard Selection Nudging
 
 - Added a draggable horizontal divider between the map and 3D preview panes so their vertical ratio can be adjusted with the mouse.

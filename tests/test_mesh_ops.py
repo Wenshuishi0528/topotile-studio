@@ -6,7 +6,8 @@ from shapely.ops import unary_union
 
 from city_modeler.dem import TerrainGrid
 from city_modeler.geo import ModelScaler
-from city_modeler.mesh_ops import build_road_meshes, build_surface_layer_meshes, extrude_polygon, is_bridge, road_width_m, road_width_mm, terrain_to_mesh
+from city_modeler.mesh_ops import build_building_meshes, build_road_meshes, build_surface_layer_meshes, extrude_polygon, is_bridge, road_width_m, road_width_mm, terrain_to_mesh
+from city_modeler.mesh_repair import mesh_diagnostics
 from city_modeler.osm import OSMFeature
 from city_modeler.params import ModelParams
 
@@ -96,6 +97,37 @@ def test_green_surface_follows_terrain_relief():
 
     assert not green.is_empty()
     assert float(np.ptp(green.vertices[:, 2])) > 5.5
+
+
+def test_building_bottom_follows_terrain_but_roof_stays_flat():
+    params = ModelParams(
+        south=0.0,
+        west=0.0,
+        north=0.01,
+        east=0.01,
+        default_building_height_m=10.0,
+        max_building_height_mm=50.0,
+    )
+    scaler = ModelScaler(scale_mm_per_m=1.0, width_mm=40.0, height_mm=40.0)
+    xs = np.tile(np.linspace(0.0, 40.0, 5), (5, 1))
+    ys = np.tile(np.linspace(0.0, 40.0, 5).reshape(5, 1), (1, 5))
+    terrain = TerrainGrid(x_mm=xs, y_mm=ys, z_mm=3.0 + ys * 0.2)
+    feature = OSMFeature(
+        layer="building",
+        geometry_m=Polygon([(5.0, 5.0), (35.0, 5.0), (35.0, 35.0), (5.0, 35.0)]),
+        tags={"building": "yes"},
+        osm_id="way/slope-building",
+    )
+
+    building = build_building_meshes([feature], scaler, terrain, params)
+    top_z = float(building.vertices[:, 2].max())
+    bottom_z = building.vertices[building.vertices[:, 2] < top_z - 1e-6, 2]
+
+    assert not building.is_empty()
+    assert float(np.ptp(bottom_z)) > 5.5
+    assert np.allclose(building.vertices[np.isclose(building.vertices[:, 2], top_z), 2], top_z)
+    assert top_z < float(bottom_z.max()) + params.default_building_height_m + 1.1
+    assert mesh_diagnostics(building)["non_manifold_edges"] == 0
 
 
 def _top_surface(part):

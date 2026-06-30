@@ -13,6 +13,7 @@
     header { padding: 16px 22px; background: #111827; color: white; }
     header h1 { margin: 0 0 4px; font-size: 20px; }
     header p { margin: 0; opacity: 0.78; font-size: 13px; }
+    .app-version { font-size: 12px; opacity: 0.62; margin-left: 8px; font-weight: 700; }
     main { display: grid; grid-template-columns: minmax(360px, 430px) 1fr; gap: 16px; padding: 16px; }
     .panel, .viewer { background: white; border: 1px solid #d9e2ec; border-radius: 12px; box-shadow: 0 1px 4px rgba(15,23,42,.05); }
     .panel { padding: 16px; max-height: calc(100vh - 118px); overflow: auto; }
@@ -117,7 +118,7 @@
 </head>
 <body>
 <header>
-  <h1>TopoTile Studio</h1>
+  <h1>TopoTile Studio <span class="app-version" id="appVersionLabel">v0.30.0</span></h1>
   <p>Local web app for generating Bambu A1-friendly 3MF city and terrain tiles.</p>
 </header>
 <main>
@@ -288,6 +289,9 @@
   </section>
 </main>
 <script>
+  const APP_VERSION = '0.30.0';
+  document.getElementById('appVersionLabel').textContent = `v${APP_VERSION}`;
+
   const map = L.map('map').setView([47.623, -122.350], 15);
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19,
@@ -842,6 +846,7 @@
     const name = (document.getElementById('output_name').value || 'topotile').trim().replace(/\s+/g, '_');
     const payload = {
       app: 'TopoTile Studio',
+      app_version: APP_VERSION,
       version: 2,
       saved_at: new Date().toISOString(),
       selection_mode: selectionMode(),
