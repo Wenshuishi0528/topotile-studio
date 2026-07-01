@@ -85,11 +85,26 @@ pip install -r requirements.txt
 
 ## Run local web app
 
+The launchers check for a compatible Python 3.11/3.12 runtime. If it is
+already installed, they create/update the local virtual environment and start
+the web app. If it is missing, they ask `yes` or `no` before trying an automatic
+install.
+
+启动文件会先检查是否有可用的 Python 3.11/3.12。如果已经安装，就会自动创建/更新本地虚拟环境并启动网页。
+如果没有检测到合适版本，会先询问 `yes` 或 `no`，得到确认后才会尝试自动安装。
+
 On macOS, you can double-click:
 
 ```text
 Open_OSM_DEM_3MF_Modeler.command
 ```
+
+If Python 3.11/3.12 is missing on macOS, the launcher can install Python 3.12
+through Homebrew after confirmation. If Homebrew is missing, it asks before
+installing Homebrew. The Homebrew installer may ask for your Mac password.
+
+如果 macOS 缺少 Python 3.11/3.12，启动器可以在确认后通过 Homebrew 安装 Python 3.12。
+如果没有 Homebrew，会先询问是否安装 Homebrew。Homebrew 安装程序可能会要求输入 Mac 密码。
 
 On Windows, you can double-click:
 
@@ -97,8 +112,12 @@ On Windows, you can double-click:
 Open_TopoTile_Studio_Windows_Start.bat
 ```
 
-The launcher checks dependencies, starts the local server, and opens the browser.
-The Windows launcher creates `.venv`, installs dependencies if needed, starts the server in a separate Command Prompt window, and opens `http://127.0.0.1:8000/`.
+If Python 3.11/3.12 is missing on Windows, the launcher can install Python 3.12
+with `winget` after confirmation. If `winget` is unavailable or installation
+fails, it opens the official Python download page.
+
+如果 Windows 缺少 Python 3.11/3.12，启动器可以在确认后通过 `winget` 安装 Python 3.12。
+如果没有 `winget` 或安装失败，会打开 Python 官方下载页面。
 
 You can also run it manually:
 

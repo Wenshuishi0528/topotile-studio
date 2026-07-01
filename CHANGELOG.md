@@ -4,6 +4,17 @@ All notable changes to TopoTile Studio are recorded here.
 
 Time zone: local macOS time. Some early entries are reconstructed from request order, screenshots, backup names, and file modification times.
 
+## 2026-07-01
+
+### 00:01 - Beginner-Friendly Python Runtime Launchers
+
+- Updated the macOS launcher to detect Python 3.11/3.12 specifically instead of any Python 3 version.
+- Added bilingual English/Chinese startup prompts with step markers such as `(1/3)`, `(2/3)`, and `(3/3)`.
+- Added optional macOS automatic setup: install Homebrew after confirmation when needed, then install Python 3.12 and continue startup.
+- Updated the Windows launcher to detect Python 3.11/3.12 and optionally install Python 3.12 through `winget` after confirmation.
+- Existing unsupported `.venv` environments are recreated with a supported Python version.
+- Updated README startup instructions for the new automatic setup flow.
+
 ## 2026-06-30
 
 ### 23:31 - GitHub Publishing Legal Docs
