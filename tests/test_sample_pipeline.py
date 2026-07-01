@@ -5,7 +5,7 @@ import pytest
 
 from city_modeler.cancel import GenerationCancelled
 from city_modeler.params import ModelParams
-from city_modeler.pipeline import generate_model, generate_sample, make_synthetic_osm_json
+from city_modeler.pipeline import generate_model, generate_sample, make_synthetic_osm_json, should_fetch_supplemental_water
 from city_modeler.export_3mf import validate_3mf
 
 
@@ -24,6 +24,17 @@ def test_generate_sample(tmp_path: Path):
     info = validate_3mf(tmp_path / files["3mf"])
     assert info["objects"] >= 2
     assert info["triangles"] > 0
+
+
+def test_supplemental_water_fetch_triggers_by_size_not_large_map_mode():
+    params = ModelParams(south=0.0, west=0.0, north=0.1, east=0.1, include_water=True, large_map_mode=False)
+
+    assert should_fetch_supplemental_water(params, width_m=4500.0, height_m=4500.0) is True
+    assert should_fetch_supplemental_water(params, width_m=8500.0, height_m=1000.0) is True
+    assert should_fetch_supplemental_water(params, width_m=3000.0, height_m=3000.0) is False
+
+    no_water = ModelParams(south=0.0, west=0.0, north=0.1, east=0.1, include_water=False, cut_out_water=False)
+    assert should_fetch_supplemental_water(no_water, width_m=20_000.0, height_m=20_000.0) is False
 
 
 def test_generate_cut_out_water_removes_water_mesh(tmp_path: Path):

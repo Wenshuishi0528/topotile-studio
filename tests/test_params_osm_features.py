@@ -166,6 +166,40 @@ def test_parse_water_relation_members():
     assert water[0].geometry_m.area > 0
 
 
+def test_parse_water_relation_uses_separate_member_way_geometry():
+    projection = make_local_projection(47.0, -122.0, 47.01, -121.99)
+
+    def point(lon, lat):
+        return {"lon": lon, "lat": lat}
+
+    osm_json = {
+        "elements": [
+            {"type": "way", "id": 11, "geometry": [point(-121.999, 47.001), point(-121.991, 47.001)]},
+            {"type": "way", "id": 12, "geometry": [point(-121.991, 47.001), point(-121.991, 47.009)]},
+            {"type": "way", "id": 13, "geometry": [point(-121.991, 47.009), point(-121.999, 47.009)]},
+            {"type": "way", "id": 14, "geometry": [point(-121.999, 47.009), point(-121.999, 47.001)]},
+            {
+                "type": "relation",
+                "id": 10,
+                "tags": {"type": "multipolygon", "natural": "water", "water": "lake"},
+                "members": [
+                    {"type": "way", "role": "outer", "ref": 11},
+                    {"type": "way", "role": "outer", "ref": 12},
+                    {"type": "way", "role": "outer", "ref": 13},
+                    {"type": "way", "role": "outer", "ref": 14},
+                ],
+            },
+        ]
+    }
+
+    features = parse_osm_features(osm_json, projection)
+    water = [feature for feature in features if feature.layer == "water"]
+
+    assert len(water) == 1
+    assert water[0].osm_id == "relation/10"
+    assert water[0].geometry_m.area > 0
+
+
 def test_closed_waterway_river_is_line_not_filled_polygon():
     projection = make_local_projection(47.0, -122.0, 47.01, -121.99)
     ring = [

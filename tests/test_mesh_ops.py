@@ -224,6 +224,65 @@ def test_area_infill_all_area_mode_generates_whole_polygons_even_with_buildings(
     assert top_surface.covers(Point(11.0, 11.0))
 
 
+def test_area_infill_all_area_mode_skips_large_parent_that_covers_details():
+    params = ModelParams(
+        south=0.0,
+        west=0.0,
+        north=0.02,
+        east=0.02,
+        area_infill_height_mm=0.40,
+        area_infill_mode="all_areas",
+    )
+    scaler = ModelScaler(scale_mm_per_m=0.12, width_mm=180.0, height_mm=180.0)
+    terrain = TerrainGrid(
+        x_mm=np.asarray([[0.0, 180.0], [0.0, 180.0]]),
+        y_mm=np.asarray([[0.0, 0.0], [180.0, 180.0]]),
+        z_mm=np.full((2, 2), 3.0),
+    )
+    broad_parent = OSMFeature(
+        layer="area_infill",
+        geometry_m=Polygon([(0.0, 0.0), (1500.0, 0.0), (1500.0, 1500.0), (0.0, 1500.0)]),
+        tags={"landuse": "commercial", "name": "Large parent district"},
+        osm_id="way/large-parent",
+    )
+    small_area = OSMFeature(
+        layer="area_infill",
+        geometry_m=Polygon([(100.0, 100.0), (240.0, 100.0), (240.0, 240.0), (100.0, 240.0)]),
+        tags={"amenity": "hospital"},
+        osm_id="way/small-specific-area",
+    )
+    detail_building = OSMFeature(
+        layer="building",
+        geometry_m=Polygon([(420.0, 420.0), (980.0, 420.0), (980.0, 980.0), (420.0, 980.0)]),
+        tags={"building": "yes"},
+        osm_id="way/detail-building",
+    )
+    primary_road = OSMFeature(
+        layer="road",
+        geometry_m=LineString([(0.0, 760.0), (1500.0, 760.0)]),
+        tags={"highway": "primary", "width": "20 m"},
+        osm_id="way/main-road",
+    )
+
+    parts = build_surface_layer_meshes(
+        [primary_road],
+        [],
+        [],
+        [],
+        [],
+        [broad_parent, small_area],
+        [detail_building],
+        scaler,
+        terrain,
+        params,
+    )
+    area_part = next(part for part in parts if part.name == "area_infill")
+    _, top_surface = _top_surface(area_part)
+
+    assert top_surface.covers(Point(20.0, 20.0))
+    assert not top_surface.covers(Point(120.0, 120.0))
+
+
 def test_road_line_densifies_over_terrain_peak():
     params = ModelParams(south=0.0, west=0.0, north=0.01, east=0.01, min_road_width_mm=0.1)
     scaler = ModelScaler(scale_mm_per_m=1.0, width_mm=40.0, height_mm=40.0)

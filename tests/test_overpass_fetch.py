@@ -80,6 +80,46 @@ def test_overpass_query_includes_building_parts_and_green_relations():
     assert 'way["office"]' in query
 
 
+def test_water_overpass_query_fetches_members_and_water_relations():
+    query = osm.water_overpass_query(47.62, -122.355, 47.626, -122.3455)
+
+    assert 'way["natural"="water"]' in query
+    assert 'relation["natural"="water"]' in query
+    assert 'relation["waterway"="riverbank"]' in query
+    assert '(._;>;);' in query
+    assert 'out body geom;' in query
+
+
+def test_merge_osm_json_keeps_richer_supplemental_geometry():
+    primary = {
+        "elements": [
+            {"type": "way", "id": 1, "tags": {"natural": "water"}, "geometry": [{"lat": 0.0, "lon": 0.0}]},
+            {"type": "way", "id": 2, "tags": {"building": "yes"}},
+        ]
+    }
+    supplemental = {
+        "elements": [
+            {
+                "type": "way",
+                "id": 1,
+                "tags": {"natural": "water"},
+                "geometry": [
+                    {"lat": 0.0, "lon": 0.0},
+                    {"lat": 0.0, "lon": 0.1},
+                    {"lat": 0.1, "lon": 0.1},
+                ],
+            }
+        ]
+    }
+
+    merged = osm.merge_osm_json(primary, supplemental)
+    by_id = {(element["type"], element["id"]): element for element in merged["elements"]}
+
+    assert len(merged["elements"]) == 2
+    assert len(by_id[("way", 1)]["geometry"]) == 3
+    assert by_id[("way", 2)]["tags"]["building"] == "yes"
+
+
 def test_fetch_osm_json_falls_back_from_default_endpoint(monkeypatch):
     calls = []
 

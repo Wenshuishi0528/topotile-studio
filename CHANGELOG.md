@@ -6,6 +6,14 @@ Time zone: local macOS time. Some early entries are reconstructed from request o
 
 ## 2026-06-30
 
+### 21:49 - Large Area Infill and Water Recovery Fixes
+
+- Changed `All area polygons` infill so very large parent polygons are automatically skipped when they cover dense existing detail such as roads, buildings, water, green areas, parking, airport pavement, or smaller infill polygons.
+- Added automatic supplemental water-boundary fetching for large selections when the water layer is enabled, triggered by selection size instead of `large_map_mode`.
+- Added OSM relation-member geometry recovery so water multipolygons can be rebuilt from separately returned member ways.
+- Added separate caching and merge handling for supplemental water Overpass responses, keeping richer duplicate geometry without dropping other OSM layers.
+- Bumped the app version to `v0.35.0`.
+
 ### 20:17 - Cancel Running Generation
 
 - Added a `Stop current job` control that can cancel the active generation from the web UI.

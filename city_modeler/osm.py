@@ -74,7 +74,9 @@ def overpass_query(south: float, west: float, north: float, east: float, timeout
   way["water"]({bbox});
   way["waterway"]({bbox});
   relation["natural"="water"]({bbox});
+  relation["natural"~"bay|strait"]({bbox});
   relation["water"]({bbox});
+  relation["waterway"="riverbank"]({bbox});
   way["landuse"~"forest|grass|meadow|recreation_ground|village_green|cemetery|allotments|orchard|vineyard|flowerbed|plant_nursery"]({bbox});
   way["leisure"~"park|garden|golf_course|playground|sports_centre|pitch|nature_reserve"]({bbox});
   way["landcover"~"grass|trees|wood|greenery|shrubs|herbaceous|flowerbed|forest|meadow"]({bbox});
@@ -112,9 +114,33 @@ out body geom;
 """.strip()
 
 
+def water_overpass_query(south: float, west: float, north: float, east: float, timeout_s: int = 120) -> str:
+    bbox = f"{south},{west},{north},{east}"
+    return f"""
+[out:json][timeout:{int(timeout_s)}];
+(
+  way["natural"="water"]({bbox});
+  way["natural"~"bay|strait"]({bbox});
+  way["natural"="coastline"]({bbox});
+  way["water"]({bbox});
+  way["waterway"]({bbox});
+  relation["natural"="water"]({bbox});
+  relation["natural"~"bay|strait"]({bbox});
+  relation["water"]({bbox});
+  relation["waterway"="riverbank"]({bbox});
+);
+(._;>;);
+out body geom;
+""".strip()
+
+
+def _osm_cache_key_for_query(query: str) -> str:
+    return hashlib.sha256(query.encode("utf-8")).hexdigest()
+
+
 def _osm_cache_key(south: float, west: float, north: float, east: float) -> str:
     query = overpass_query(south, west, north, east, timeout_s=0)
-    return hashlib.sha256(query.encode("utf-8")).hexdigest()
+    return _osm_cache_key_for_query(query)
 
 
 def _osm_cache_path(key: str) -> Path:
@@ -148,19 +174,13 @@ def _save_osm_cache(key: str, data: dict[str, Any]) -> None:
             pass
 
 
-def fetch_osm_json(
-    south: float,
-    west: float,
-    north: float,
-    east: float,
-    overpass_url: str = DEFAULT_OVERPASS_URL,
-    overpass_timeout_s: int = 90,
-    read_timeout_s: int = 120,
-    cancel_check: CancelCheck | None = None,
+def _fetch_overpass_query_json(
+    query: str,
+    cache_key: str,
+    overpass_url: str,
+    read_timeout_s: int,
+    cancel_check: CancelCheck | None,
 ) -> dict[str, Any]:
-    check_cancel(cancel_check)
-    query = overpass_query(south, west, north, east, timeout_s=overpass_timeout_s)
-    cache_key = _osm_cache_key(south, west, north, east)
     cached = _load_osm_cache(cache_key)
     if cached is not None:
         check_cancel(cancel_check)
@@ -199,6 +219,39 @@ def fetch_osm_json(
         "or did not respond. No API key is required for normal use; try a smaller map selection "
         f"or retry later. Details: {detail}"
     )
+
+
+def fetch_osm_json(
+    south: float,
+    west: float,
+    north: float,
+    east: float,
+    overpass_url: str = DEFAULT_OVERPASS_URL,
+    overpass_timeout_s: int = 90,
+    read_timeout_s: int = 120,
+    cancel_check: CancelCheck | None = None,
+) -> dict[str, Any]:
+    check_cancel(cancel_check)
+    query = overpass_query(south, west, north, east, timeout_s=overpass_timeout_s)
+    cache_key = _osm_cache_key(south, west, north, east)
+    return _fetch_overpass_query_json(query, cache_key, overpass_url, read_timeout_s, cancel_check)
+
+
+def fetch_water_osm_json(
+    south: float,
+    west: float,
+    north: float,
+    east: float,
+    overpass_url: str = DEFAULT_OVERPASS_URL,
+    overpass_timeout_s: int = 120,
+    read_timeout_s: int = 150,
+    cancel_check: CancelCheck | None = None,
+) -> dict[str, Any]:
+    check_cancel(cancel_check)
+    query = water_overpass_query(south, west, north, east, timeout_s=overpass_timeout_s)
+    cache_query = water_overpass_query(south, west, north, east, timeout_s=0)
+    cache_key = _osm_cache_key_for_query(cache_query)
+    return _fetch_overpass_query_json(query, cache_key, overpass_url, read_timeout_s, cancel_check)
 
 
 def _bbox_tiles(
@@ -257,6 +310,17 @@ def _merge_best_elements(target: dict[tuple[str, str], dict[str, Any]], elements
         existing = target.get(key)
         if existing is None or _element_geometry_score(element) > _element_geometry_score(existing):
             target[key] = element
+
+
+def merge_osm_json(primary: dict[str, Any], supplemental: dict[str, Any]) -> dict[str, Any]:
+    elements_by_id: dict[tuple[str, str], dict[str, Any]] = {}
+    _merge_best_elements(elements_by_id, primary.get("elements", []))
+    _merge_best_elements(elements_by_id, supplemental.get("elements", []))
+    merged = dict(primary)
+    merged["elements"] = list(elements_by_id.values())
+    merged["supplemental_element_count"] = len(supplemental.get("elements", []))
+    merged["merged_element_count"] = len(merged["elements"])
+    return merged
 
 
 def _fetch_tile_recursive(
@@ -540,12 +604,31 @@ def _clip_geom(geom: BaseGeometry, clip: Polygon) -> BaseGeometry | None:
     return _safe_geom(geom)
 
 
-def _relation_member_lines(element: dict[str, Any], projection: LocalProjection) -> list[LineString]:
+def _member_raw_geometry(
+    member: dict[str, Any],
+    way_geometries: dict[str, list[dict[str, Any]]] | None = None,
+) -> list[dict[str, Any]]:
+    raw_geom = member.get("geometry") or []
+    if raw_geom:
+        return raw_geom
+    if not way_geometries:
+        return []
+    ref = member.get("ref")
+    if ref is None:
+        return []
+    return way_geometries.get(str(ref), [])
+
+
+def _relation_member_lines(
+    element: dict[str, Any],
+    projection: LocalProjection,
+    way_geometries: dict[str, list[dict[str, Any]]] | None = None,
+) -> list[LineString]:
     lines: list[LineString] = []
     for member in element.get("members") or []:
         if member.get("type") != "way":
             continue
-        raw_geom = member.get("geometry") or []
+        raw_geom = _member_raw_geometry(member, way_geometries)
         lonlat = _lonlat_from_geometry(raw_geom)
         if len(lonlat) < 2:
             continue
@@ -559,14 +642,18 @@ def _relation_member_lines(element: dict[str, Any], projection: LocalProjection)
     return lines
 
 
-def _relation_member_lines_by_role(element: dict[str, Any], projection: LocalProjection) -> tuple[list[LineString], list[LineString], list[LineString]]:
+def _relation_member_lines_by_role(
+    element: dict[str, Any],
+    projection: LocalProjection,
+    way_geometries: dict[str, list[dict[str, Any]]] | None = None,
+) -> tuple[list[LineString], list[LineString], list[LineString]]:
     outer: list[LineString] = []
     inner: list[LineString] = []
     all_lines: list[LineString] = []
     for member in element.get("members") or []:
         if member.get("type") != "way":
             continue
-        raw_geom = member.get("geometry") or []
+        raw_geom = _member_raw_geometry(member, way_geometries)
         lonlat = _lonlat_from_geometry(raw_geom)
         if len(lonlat) < 2:
             continue
@@ -600,8 +687,13 @@ def _polygonize_lines(lines: list[LineString]) -> BaseGeometry | None:
         return None
 
 
-def _polygons_from_relation(element: dict[str, Any], projection: LocalProjection, clip: Polygon) -> list[Polygon]:
-    outer_lines, inner_lines, all_lines = _relation_member_lines_by_role(element, projection)
+def _polygons_from_relation(
+    element: dict[str, Any],
+    projection: LocalProjection,
+    clip: Polygon,
+    way_geometries: dict[str, list[dict[str, Any]]] | None = None,
+) -> list[Polygon]:
+    outer_lines, inner_lines, all_lines = _relation_member_lines_by_role(element, projection, way_geometries)
     if not all_lines:
         return []
     geom = _polygonize_lines(outer_lines) or _polygonize_lines(all_lines)
@@ -687,8 +779,14 @@ def parse_osm_features(osm_json: dict[str, Any], projection: LocalProjection) ->
     features: list[OSMFeature] = []
     clip = projection.bbox_polygon_m
     coastlines: list[LineString] = []
+    elements = osm_json.get("elements", [])
+    way_geometries = {
+        str(element.get("id")): element.get("geometry") or []
+        for element in elements
+        if element.get("type") == "way" and element.get("id") is not None and len(element.get("geometry") or []) >= 2
+    }
 
-    for element in osm_json.get("elements", []):
+    for element in elements:
         element_type = element.get("type")
         tags = {str(k): str(v) for k, v in (element.get("tags") or {}).items()}
         if element_type == "relation":
@@ -696,7 +794,7 @@ def parse_osm_features(osm_json: dict[str, Any], projection: LocalProjection) ->
             if layer in {"green", "building", "parking", "airport", "area_infill"} or (
                 layer == "water" and _closed_way_should_be_polygon("water", tags, is_closed=True)
             ):
-                for poly in _polygons_from_relation(element, projection, clip):
+                for poly in _polygons_from_relation(element, projection, clip, way_geometries):
                     features.append(OSMFeature(layer=layer, geometry_m=poly, tags=tags, osm_id=f"relation/{element.get('id', 'unknown')}"))
             continue
 

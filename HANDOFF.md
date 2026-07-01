@@ -1,11 +1,11 @@
 # TopoTile Studio Handoff
 
-Last updated: 2026-06-30-2017
+Last updated: 2026-06-30-2149
 
 ## Current State
 
 - Project name: TopoTile Studio
-- Current app version: `v0.34.0`
+- Current app version: `v0.35.0`
 - Local project path: `/Users/apple/Downloads/osm_dem_3mf_modeler`
 - GitHub remote: `https://github.com/Wenshuishi0528/topotile-studio.git`
 - Current branch: `main`
@@ -14,7 +14,7 @@ Last updated: 2026-06-30-2017
 - Latest local backup: `/Users/apple/Documents/Codex/2026-06-30/topotile_studio_backup_20260630-184250`
 - Local web URL: `http://127.0.0.1:8000/`
 
-At this handoff, the working tree includes an English/Chinese language switch in the page header and a cancellable generation flow. The selected language is stored in browser local storage. Running generation jobs can be asked to stop through `POST /api/jobs/{job_id}/cancel`; cancellation is cooperative, so an in-flight HTTP request may need to return or timeout before the job reaches `cancelled`.
+At this handoff, the working tree includes an English/Chinese language switch, cancellable generation flow, automatic large-water-boundary recovery, and broad-parent area-infill suppression for large all-area exports. Running generation jobs can be asked to stop through `POST /api/jobs/{job_id}/cancel`; cancellation is cooperative, so an in-flight HTTP request may need to return or timeout before the job reaches `cancelled`.
 
 ## How To Run
 
@@ -214,9 +214,9 @@ Regression risks the user has already encountered:
 
 ## Versioning Guidance
 
-Current version is `v0.34.0`.
+Current version is `v0.35.0`.
 
-The user counted 29 recorded iterations before adding terrain-fitted building bases. Terrain-fitted building bases became `v0.30.0`; GPX/KML raised routes became `v0.31.0`; the built-in offline sample became `v0.32.0`; generic sample labeling and author credit became `v0.32.1`; the English/Chinese UI toggle became `v0.33.0`; cancellable generation jobs became `v0.34.0`.
+The user counted 29 recorded iterations before adding terrain-fitted building bases. Terrain-fitted building bases became `v0.30.0`; GPX/KML raised routes became `v0.31.0`; the built-in offline sample became `v0.32.0`; generic sample labeling and author credit became `v0.32.1`; the English/Chinese UI toggle became `v0.33.0`; cancellable generation jobs became `v0.34.0`; broad-parent area-infill suppression and automatic large-water-boundary recovery became `v0.35.0`.
 
 Suggested rule:
 

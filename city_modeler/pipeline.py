@@ -29,7 +29,16 @@ from .mesh_ops import (
 )
 from .mesh_repair import repair_mesh_parts
 from .mesh_types import MeshPart
-from .osm import fetch_osm_json, fetch_osm_json_tiled, parse_osm_features, save_osm_json, OSMFeature
+from .osm import (
+    OverpassFetchError,
+    fetch_osm_json,
+    fetch_osm_json_tiled,
+    fetch_water_osm_json,
+    merge_osm_json,
+    parse_osm_features,
+    save_osm_json,
+    OSMFeature,
+)
 from .params import ModelParams, safe_output_stem
 from .printability import printability_report
 from .routes import route_point_count, route_segments_to_local_lines
@@ -39,6 +48,8 @@ ROOT = Path(__file__).resolve().parents[1]
 SAMPLE_DIR = ROOT / "data" / "samples"
 OFFLINE_SAMPLE_3MF = SAMPLE_DIR / "offline_test_model.3mf"
 OFFLINE_SAMPLE_PROJECT = SAMPLE_DIR / "offline_test_model_project.json"
+WATER_RECOVERY_MIN_AREA_KM2 = 20.0
+WATER_RECOVERY_MIN_SIDE_KM = 8.0
 
 
 def _progress(progress: Progress | None, message: str, value: float) -> None:
@@ -95,6 +106,14 @@ def footprint_polygon_m(params: ModelParams, width_m: float, height_m: float) ->
 
 def rectangle_polygon_m(width_m: float, height_m: float) -> Polygon:
     return Polygon([(0.0, 0.0), (width_m, 0.0), (width_m, height_m), (0.0, height_m), (0.0, 0.0)])
+
+
+def should_fetch_supplemental_water(params: ModelParams, width_m: float, height_m: float) -> bool:
+    if not (params.include_water or params.cut_out_water):
+        return False
+    area_km2 = max(0.0, width_m * height_m) / 1_000_000.0
+    max_side_km = max(width_m, height_m) / 1000.0
+    return area_km2 >= WATER_RECOVERY_MIN_AREA_KM2 or max_side_km >= WATER_RECOVERY_MIN_SIDE_KM
 
 
 def footprint_polygon_mm(footprint_m: Polygon | None, scaler) -> Polygon | None:
@@ -230,6 +249,13 @@ def generate_model(
     check_cancel(cancel_check)
 
     _progress(progress, "Loading OpenStreetMap data", 0.28)
+    fetched_osm = False
+    water_recovery = {
+        "enabled": False,
+        "status": "not_needed",
+        "threshold_area_km2": WATER_RECOVERY_MIN_AREA_KM2,
+        "threshold_side_km": WATER_RECOVERY_MIN_SIDE_KM,
+    }
     if osm_json_override is not None:
         osm_json = osm_json_override
     elif osm_json_path:
@@ -259,7 +285,44 @@ def generate_model(
                 params.osm_overpass_url,
                 cancel_check=cancel_check,
             )
+        fetched_osm = True
         check_cancel(cancel_check)
+
+        if should_fetch_supplemental_water(params, projection.width_m, projection.height_m):
+            _progress(progress, "Loading supplemental water boundaries", 0.38)
+            before_count = len(osm_json.get("elements", []))
+            try:
+                supplemental_water = fetch_water_osm_json(
+                    params.south,
+                    params.west,
+                    params.north,
+                    params.east,
+                    params.osm_overpass_url,
+                    cancel_check=cancel_check,
+                )
+                supplemental_count = len(supplemental_water.get("elements", []))
+                osm_json = merge_osm_json(osm_json, supplemental_water)
+                after_count = len(osm_json.get("elements", []))
+                water_recovery = {
+                    "enabled": True,
+                    "status": "complete",
+                    "threshold_area_km2": WATER_RECOVERY_MIN_AREA_KM2,
+                    "threshold_side_km": WATER_RECOVERY_MIN_SIDE_KM,
+                    "source_elements": before_count,
+                    "supplemental_elements": supplemental_count,
+                    "merged_elements": after_count,
+                }
+            except OverpassFetchError as exc:
+                water_recovery = {
+                    "enabled": True,
+                    "status": "failed",
+                    "threshold_area_km2": WATER_RECOVERY_MIN_AREA_KM2,
+                    "threshold_side_km": WATER_RECOVERY_MIN_SIDE_KM,
+                    "error": str(exc)[:500],
+                }
+            check_cancel(cancel_check)
+
+    if fetched_osm:
         save_osm_json(osm_json, output_dir / "osm_raw.json")
 
     _progress(progress, "Parsing OSM features", 0.40)
@@ -359,6 +422,7 @@ def generate_model(
             "enabled": params.cut_out_water,
             "polygons": len(water_cutouts),
         },
+        "water_recovery": water_recovery,
         "osm_tile_count": osm_json.get("tile_count"),
         "osm_tile_errors": osm_json.get("tile_errors"),
         "features": {

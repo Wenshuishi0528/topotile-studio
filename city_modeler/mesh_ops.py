@@ -10,6 +10,7 @@ from shapely.geometry.base import BaseGeometry
 from shapely import constrained_delaunay_triangles
 from shapely.ops import triangulate, unary_union
 from shapely.prepared import prep
+from shapely.strtree import STRtree
 from shapely.validation import make_valid
 
 from .dem import TerrainGrid
@@ -33,6 +34,13 @@ COLORS = {
 MIN_PRINTABLE_HOLE_AREA_MM2 = 1e-3
 MAX_TOUCHING_HOLE_AREA_MM2 = 10.0
 HOLE_TOUCH_PRECISION_MM = 1e-6
+AREA_INFILL_PARENT_MIN_AREA_M2 = 1_000_000.0
+AREA_INFILL_PARENT_LARGE_MAP_MIN_AREA_M2 = 20_000_000.0
+AREA_INFILL_PARENT_MIN_SELECTION_FRACTION = 0.015
+AREA_INFILL_PARENT_ROAD_RATIO = 0.006
+AREA_INFILL_PARENT_DETAIL_RATIO = 0.08
+AREA_INFILL_PARENT_CHILD_RATIO = 0.015
+AREA_INFILL_PARENT_CHILD_COUNT = 3
 
 
 def _terrain_cut_mask(
@@ -1163,6 +1171,90 @@ def make_layer_mesh_mm(
     return merge_parts(name, parts, color)
 
 
+def _intersection_area(a: BaseGeometry | None, b: BaseGeometry) -> float:
+    if a is None or a.is_empty or b.is_empty:
+        return 0.0
+    try:
+        return float(a.intersection(b).area)
+    except Exception:
+        return 0.0
+
+
+def _is_large_area_infill_parent(poly: Polygon, selection_area_m2: float) -> bool:
+    if poly.area >= AREA_INFILL_PARENT_MIN_AREA_M2:
+        return True
+    if selection_area_m2 < AREA_INFILL_PARENT_LARGE_MAP_MIN_AREA_M2:
+        return False
+    return poly.area / selection_area_m2 >= AREA_INFILL_PARENT_MIN_SELECTION_FRACTION
+
+
+def _area_infill_child_conflict(
+    poly: Polygon,
+    poly_index: int,
+    area_polys: list[Polygon],
+    area_tree: STRtree,
+) -> tuple[int, float]:
+    child_count = 0
+    child_area = 0.0
+    try:
+        candidates = area_tree.query(poly)
+    except Exception:
+        return 0, 0.0
+    for raw_index in candidates:
+        try:
+            index = int(raw_index)
+        except (TypeError, ValueError):
+            continue
+        if index == poly_index:
+            continue
+        child = area_polys[index]
+        if child.is_empty or child.area <= 1e-6 or child.area >= poly.area * 0.65:
+            continue
+        try:
+            overlap = float(poly.intersection(child).area)
+        except Exception:
+            continue
+        if overlap <= 1e-6:
+            continue
+        if overlap / child.area >= 0.50:
+            child_count += 1
+            child_area += overlap
+    return child_count, child_area
+
+
+def _filter_large_parent_area_infill(
+    area_polys: list[Polygon],
+    scaler: ModelScaler,
+    road_cutout_union: BaseGeometry | None,
+    detail_union: BaseGeometry | None,
+) -> list[Polygon]:
+    if len(area_polys) < 2:
+        return area_polys
+    selection_area_m2 = scaler.length_mm_to_m(scaler.width_mm) * scaler.length_mm_to_m(scaler.height_mm)
+    if selection_area_m2 <= 0:
+        return area_polys
+    area_tree = STRtree(area_polys)
+    selected: list[Polygon] = []
+    for index, poly in enumerate(area_polys):
+        if poly.is_empty or poly.area <= 1e-6:
+            continue
+        if not _is_large_area_infill_parent(poly, selection_area_m2):
+            selected.append(poly)
+            continue
+        area = float(poly.area)
+        road_ratio = _intersection_area(road_cutout_union, poly) / area
+        detail_ratio = _intersection_area(detail_union, poly) / area
+        child_count, child_area = _area_infill_child_conflict(poly, index, area_polys, area_tree)
+        child_ratio = child_area / area
+        has_nested_detail = child_count >= AREA_INFILL_PARENT_CHILD_COUNT or child_ratio >= AREA_INFILL_PARENT_CHILD_RATIO
+        covers_explicit_detail = detail_ratio >= AREA_INFILL_PARENT_DETAIL_RATIO
+        covers_roads = road_ratio >= AREA_INFILL_PARENT_ROAD_RATIO
+        if (covers_roads and (covers_explicit_detail or has_nested_detail)) or (covers_explicit_detail and has_nested_detail):
+            continue
+        selected.append(poly)
+    return selected
+
+
 def build_surface_layer_meshes(
     road_features: list[OSMFeature],
     water_features: list[OSMFeature],
@@ -1190,6 +1282,12 @@ def build_surface_layer_meshes(
     parking_union = unary_union(parking_polys) if parking_polys else None
     airport_union = unary_union(airport_polys) if airport_polys else None
     building_union = unary_union(building_polys) if building_polys else None
+    detail_geoms = [
+        geom
+        for geom in (building_union, water_union, green_union, parking_union, airport_union, road_cutout_union)
+        if geom is not None and not geom.is_empty
+    ]
+    detail_union = unary_union(detail_geoms) if detail_geoms else None
 
     cleaned_parking: list[Polygon] = []
     for pp in parking_polys:
@@ -1232,6 +1330,13 @@ def build_surface_layer_meshes(
                 for poly in selected_area_infill
                 if poly.intersection(building_union).area <= 1e-6
             ]
+        elif params.area_infill_mode == "all_areas":
+            selected_area_infill = _filter_large_parent_area_infill(
+                selected_area_infill,
+                scaler,
+                road_cutout_union,
+                detail_union,
+            )
         parts.append(make_layer_mesh(
             "area_infill",
             selected_area_infill,
