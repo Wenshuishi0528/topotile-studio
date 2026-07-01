@@ -75,7 +75,14 @@
     .download-primary { display: block; box-sizing: border-box; text-align: center; margin-top: 10px; padding: 11px 12px; border-radius: 8px; background: #16a34a; color: white; text-decoration: none; font-weight: 800; }
     .download-primary.alt { background: #0f766e; }
     .download-primary.disabled { pointer-events: none; background: #cbd5e1; color: #64748b; }
-    model-viewer { width: 100%; height: 100%; min-height: 300px; background: #eef2f7; }
+    model-viewer {
+      width: 100%;
+      height: 100%;
+      min-height: 300px;
+      background: #eef2f7;
+      transform: translate3d(var(--preview-pan-x, 0px), var(--preview-pan-y, 0px), 0);
+      will-change: transform;
+    }
     model-viewer.preview-panning { cursor: grabbing; }
     .preview-shell { position: relative; min-height: 300px; overflow: hidden; background: #eef2f7; }
     .preview-toolbar {
@@ -127,7 +134,7 @@
 </head>
 <body>
 <header>
-  <h1>TopoTile Studio <span class="app-version" id="appVersionLabel">v0.36.0</span></h1>
+  <h1>TopoTile Studio <span class="app-version" id="appVersionLabel">v0.36.1</span></h1>
   <div class="header-actions">
     <div class="author-name">Made by Wenshuishi</div>
     <div class="language-switch" aria-label="Language">
@@ -323,7 +330,7 @@
   </section>
 </main>
 <script>
-  const APP_VERSION = '0.36.0';
+  const APP_VERSION = '0.36.1';
   document.getElementById('appVersionLabel').textContent = `v${APP_VERSION}`;
 
   const LANGUAGE_STORAGE_KEY = 'topotile.language';
@@ -1307,8 +1314,10 @@
   document.getElementById('clearRoute').addEventListener('click', clearRoute);
 
   const preview = document.getElementById('preview');
+  const previewShell = preview.closest('.preview-shell');
   const previewAutoRotate = document.getElementById('preview_auto_rotate');
   let previewBaseRadius = null;
+  let previewPanOffset = {x: 0, y: 0};
   let previewPanState = null;
 
   function syncPreviewAutoRotate() {
@@ -1342,66 +1351,19 @@
     if (preview.jumpCameraToGoal) preview.jumpCameraToGoal();
   }
 
-  function getPreviewTarget() {
-    if (preview.getCameraTarget) {
-      const target = preview.getCameraTarget();
-      if (target && Number.isFinite(target.x) && Number.isFinite(target.y) && Number.isFinite(target.z)) {
-        return {x: target.x, y: target.y, z: target.z};
-      }
-    }
-    const rawTarget = preview.cameraTarget || preview.getAttribute('camera-target') || '';
-    const values = String(rawTarget).match(/-?\d+(?:\.\d+)?/g);
-    if (values && values.length >= 3) {
-      return {
-        x: Number(values[0]) || 0,
-        y: Number(values[1]) || 0,
-        z: Number(values[2]) || 0,
-      };
-    }
-    return {x: 0, y: 0, z: 0};
+  function setPreviewPanOffset(x, y) {
+    previewPanOffset = {x, y};
+    preview.style.setProperty('--preview-pan-x', `${x}px`);
+    preview.style.setProperty('--preview-pan-y', `${y}px`);
   }
 
-  function normalizedVector(vector, fallback) {
-    const length = Math.hypot(vector.x, vector.y, vector.z);
-    if (!Number.isFinite(length) || length <= 0.000001) return fallback;
-    return {x: vector.x / length, y: vector.y / length, z: vector.z / length};
-  }
-
-  function cameraPanBasis(orbit) {
-    const theta = Number.isFinite(orbit.theta) ? orbit.theta : 0;
-    const phi = Number.isFinite(orbit.phi) ? orbit.phi : Math.PI / 2;
-    const sinPhi = Math.sin(phi);
-    const cameraDir = normalizedVector({
-      x: sinPhi * Math.sin(theta),
-      y: Math.cos(phi),
-      z: sinPhi * Math.cos(theta),
-    }, {x: 0, y: 0, z: 1});
-    const right = normalizedVector({
-      x: cameraDir.z,
-      y: 0,
-      z: -cameraDir.x,
-    }, {x: 1, y: 0, z: 0});
-    const up = normalizedVector({
-      x: cameraDir.y * right.z - cameraDir.z * right.y,
-      y: cameraDir.z * right.x - cameraDir.x * right.z,
-      z: cameraDir.x * right.y - cameraDir.y * right.x,
-    }, {x: 0, y: 1, z: 0});
-    return {right, up};
-  }
-
-  function applyPreviewPan(dx, dy) {
-    if (!previewPanState) return;
-    const {target, right, up, metersPerPixel} = previewPanState;
-    const x = target.x + (-dx * right.x + dy * up.x) * metersPerPixel;
-    const y = target.y + (-dx * right.y + dy * up.y) * metersPerPixel;
-    const z = target.z + (-dx * right.z + dy * up.z) * metersPerPixel;
-    preview.cameraTarget = `${x}m ${y}m ${z}m`;
-    if (preview.jumpCameraToGoal) preview.jumpCameraToGoal();
+  function resetPreviewPanOffset() {
+    setPreviewPanOffset(0, 0);
   }
 
   function stopPreviewPan(event) {
     if (!previewPanState) return;
-    if (event && event.type === 'mouseup' && event.button !== 1) return;
+    if (event && (event.type === 'mouseup' || event.type === 'pointerup') && event.button !== 1) return;
     if (event) {
       event.preventDefault();
       event.stopImmediatePropagation();
@@ -1411,6 +1373,9 @@
     }
     previewPanState = null;
     preview.classList.remove('preview-panning');
+    document.removeEventListener('pointermove', movePreviewPan, true);
+    document.removeEventListener('pointerup', stopPreviewPan, true);
+    document.removeEventListener('pointercancel', stopPreviewPan, true);
     document.removeEventListener('mousemove', movePreviewPan, true);
     document.removeEventListener('mouseup', stopPreviewPan, true);
   }
@@ -1423,36 +1388,41 @@
     }
     event.preventDefault();
     event.stopImmediatePropagation();
-    applyPreviewPan(event.clientX - previewPanState.startX, event.clientY - previewPanState.startY);
+    setPreviewPanOffset(
+      previewPanState.startOffset.x + event.clientX - previewPanState.startX,
+      previewPanState.startOffset.y + event.clientY - previewPanState.startY
+    );
   }
 
   function startPreviewPan(event) {
-    if (event.button !== 1 || !preview.getCameraOrbit) return;
-    const orbit = preview.getCameraOrbit();
-    if (!orbit || !Number.isFinite(orbit.radius) || orbit.radius <= 0) return;
+    if (event.button !== 1) return;
     event.preventDefault();
     event.stopImmediatePropagation();
-    const {right, up} = cameraPanBasis(orbit);
+    if (previewPanState) return;
     previewPanState = {
       startX: event.clientX,
       startY: event.clientY,
-      target: getPreviewTarget(),
-      right,
-      up,
-      metersPerPixel: Math.max(orbit.radius * 0.0017, 0.001),
+      startOffset: {...previewPanOffset},
       restoreAutoRotate: preview.hasAttribute('auto-rotate'),
     };
     preview.removeAttribute('auto-rotate');
     preview.classList.add('preview-panning');
+    document.addEventListener('pointermove', movePreviewPan, true);
+    document.addEventListener('pointerup', stopPreviewPan, true);
+    document.addEventListener('pointercancel', stopPreviewPan, true);
     document.addEventListener('mousemove', movePreviewPan, true);
     document.addEventListener('mouseup', stopPreviewPan, true);
   }
 
   previewAutoRotate.addEventListener('change', syncPreviewAutoRotate);
-  preview.addEventListener('load', rememberPreviewRadius);
+  preview.addEventListener('load', () => {
+    rememberPreviewRadius();
+    resetPreviewPanOffset();
+  });
   preview.addEventListener('wheel', zoomPreviewByWheel, {passive: false});
-  preview.addEventListener('mousedown', startPreviewPan, true);
-  preview.addEventListener('auxclick', event => {
+  previewShell.addEventListener('pointerdown', startPreviewPan, true);
+  previewShell.addEventListener('mousedown', startPreviewPan, true);
+  previewShell.addEventListener('auxclick', event => {
     if (event.button === 1) event.preventDefault();
   }, true);
   window.addEventListener('blur', () => stopPreviewPan());

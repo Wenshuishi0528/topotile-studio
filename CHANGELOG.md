@@ -6,6 +6,13 @@ Time zone: local macOS time. Some early entries are reconstructed from request o
 
 ## 2026-07-01
 
+### 00:40 - Preview Pan Rewrite
+
+- Rewrote middle-mouse preview panning as a pure 2D screen-space shift of the preview layer instead of changing the 3D camera target.
+- Intercepts middle-button pointer and mouse events at the preview container before `model-viewer` can treat them as orbit controls.
+- Resets the 2D preview pan when a new model loads and keeps the exported 3MF geometry unchanged.
+- Bumped the app version to `v0.36.1`.
+
 ### 00:18 - Middle-Mouse Preview Pan
 
 - Added middle-mouse drag panning in the 3D preview so the model can be moved up, down, left, and right within the preview pane without changing exported geometry.
