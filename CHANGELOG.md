@@ -6,6 +6,10 @@ Time zone: local macOS time. Some early entries are reconstructed from request o
 
 ## 2026-07-01
 
+### 01:16 - Offline Test Button Placement
+
+- Moved the `Offline Test Model` button and helper text above the `Mesh repair` controls in the left toolbar.
+
 ### 01:06 - Selection Edge Drag Handles
 
 - Added draggable handles on the north, east, south, and west edges of the map selection box.

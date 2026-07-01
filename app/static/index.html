@@ -183,8 +183,6 @@
     <input id="output_name" type="text" value="city_model" maxlength="80" placeholder="city_model">
     <input id="project_file" type="file" accept=".json,application/json" hidden>
     <div class="small" id="projectStatus">The generated 3MF, GLB, STL, and chunk ZIP use this name.</div>
-    <button class="secondary" id="sample" type="button">Offline Test Model</button>
-    <div class="small">Built-in sample: generates a test model without internet.</div>
 
     <div class="button-row">
       <button class="secondary" id="useView">Use map view</button>
@@ -315,6 +313,9 @@
       <div><label>Chunk columns</label><input id="chunk_cols" type="number" value="2" min="1" max="6"></div>
     </div>
     <div class="small">Numbering starts at the southwest corner: r01_c01, then east by column and north by row.</div>
+
+    <button class="secondary" id="sample" type="button">Offline Test Model</button>
+    <div class="small">Built-in sample: generates a test model without internet.</div>
 
     <label>Mesh repair</label>
     <div class="checks">
