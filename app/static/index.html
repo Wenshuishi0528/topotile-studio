@@ -119,6 +119,24 @@
       border-radius: 50%;
       box-shadow: 0 1px 4px rgba(15,23,42,.3);
     }
+    .bbox-edge-handle {
+      border: 2px solid #2563eb;
+      background: white;
+      border-radius: 999px;
+      box-shadow: 0 1px 4px rgba(15,23,42,.3);
+    }
+    .bbox-edge-n,
+    .bbox-edge-s {
+      width: 24px;
+      height: 10px;
+      cursor: ns-resize;
+    }
+    .bbox-edge-e,
+    .bbox-edge-w {
+      width: 10px;
+      height: 24px;
+      cursor: ew-resize;
+    }
     .bbox-move-handle {
       width: 18px;
       height: 18px;
@@ -136,7 +154,7 @@
 </head>
 <body>
 <header>
-  <h1>TopoTile Studio <span class="app-version" id="appVersionLabel">v0.36.2</span></h1>
+  <h1>TopoTile Studio <span class="app-version" id="appVersionLabel">v0.36.3</span></h1>
   <div class="header-actions">
     <div class="author-name">Made by Wenshuishi</div>
     <div class="language-switch" aria-label="Language">
@@ -335,7 +353,7 @@
   </section>
 </main>
 <script>
-  const APP_VERSION = '0.36.2';
+  const APP_VERSION = '0.36.3';
   document.getElementById('appVersionLabel').textContent = `v${APP_VERSION}`;
 
   const LANGUAGE_STORAGE_KEY = 'topotile.language';
@@ -457,6 +475,7 @@
     'Resize map and preview panes': '调整地图和预览窗口大小',
     '3D preview will appear after generation': '生成后会显示 3D 预览',
     'Drag to resize selection': '拖拽调整选择框大小',
+    'Drag to resize selection edge': '拖拽调整选择框边界',
     'Drag to move selection': '拖拽移动选择框',
     'Selection ({mode}): {width} m × {height} m, {area} km².': '选择框（{mode}）：{width} m × {height} m，{area} km²。',
     ' This is large for public OSM queries; shrink it if generation fails.': ' 这个范围对公共 OSM 查询偏大；如果生成失败，请缩小范围。',
@@ -680,6 +699,7 @@
   }).addTo(map);
   let bboxRect = null;
   let cornerMarkers = [];
+  let edgeMarkers = [];
   let moveMarker = null;
   let moveStart = null;
   let moveStartBounds = null;
@@ -688,6 +708,12 @@
   let routeLayer = null;
   let routeFileName = '';
   const cornerIcon = L.divIcon({className: 'bbox-handle', iconSize: [14, 14]});
+  const edgeIcons = {
+    n: L.divIcon({className: 'bbox-edge-handle bbox-edge-n', iconSize: [24, 10]}),
+    s: L.divIcon({className: 'bbox-edge-handle bbox-edge-s', iconSize: [24, 10]}),
+    e: L.divIcon({className: 'bbox-edge-handle bbox-edge-e', iconSize: [10, 24]}),
+    w: L.divIcon({className: 'bbox-edge-handle bbox-edge-w', iconSize: [10, 24]}),
+  };
   const moveIcon = L.divIcon({className: 'bbox-move-handle', iconSize: [18, 18]});
 
   const viewer = document.querySelector('.viewer');
@@ -981,6 +1007,20 @@
     ];
   }
 
+  function edgeHandlePoints(bounds) {
+    const north = bounds.getNorth();
+    const south = bounds.getSouth();
+    const east = bounds.getEast();
+    const west = bounds.getWest();
+    const center = bounds.getCenter();
+    return [
+      {name: 'n', latlng: [north, center.lng], icon: edgeIcons.n},
+      {name: 'e', latlng: [center.lat, east], icon: edgeIcons.e},
+      {name: 's', latlng: [south, center.lng], icon: edgeIcons.s},
+      {name: 'w', latlng: [center.lat, west], icon: edgeIcons.w},
+    ];
+  }
+
   function updateRectFromBounds(bounds) {
     const box = boundsToBBox(bounds);
     writeBBox(box);
@@ -1053,14 +1093,65 @@
     return bboxToBounds(normalizeBBox(box));
   }
 
+  function constrainBoxFromEdge(name, currentBox, latlng, ratio) {
+    const b = normalizeBBox(currentBox);
+    if (!ratio) {
+      if (name === 'n') b.north = latlng.lat;
+      if (name === 's') b.south = latlng.lat;
+      if (name === 'e') b.east = latlng.lng;
+      if (name === 'w') b.west = latlng.lng;
+      return normalizeBBox(b);
+    }
+
+    if (name === 'n' || name === 's') {
+      const anchorLat = name === 'n' ? b.south : b.north;
+      const latSign = name === 'n' ? 1 : -1;
+      const edgeLat = latlng.lat;
+      const midLat = (anchorLat + edgeLat) / 2;
+      const meters = metersPerDegree(midLat);
+      const heightM = Math.max(1, Math.abs((edgeLat - anchorLat) * meters.latM));
+      const widthM = heightM * ratio;
+      const nextEdgeLat = anchorLat + latSign * heightM / meters.latM;
+      const centerLng = (b.west + b.east) / 2;
+      const halfWidthDeg = widthM / 2 / meters.lonM;
+      return normalizeBBox({
+        south: Math.min(anchorLat, nextEdgeLat),
+        north: Math.max(anchorLat, nextEdgeLat),
+        west: centerLng - halfWidthDeg,
+        east: centerLng + halfWidthDeg,
+      });
+    }
+
+    const centerLat = (b.south + b.north) / 2;
+    const meters = metersPerDegree(centerLat);
+    const anchorLng = name === 'e' ? b.west : b.east;
+    const lngSign = name === 'e' ? 1 : -1;
+    const edgeLng = latlng.lng;
+    const widthM = Math.max(1, Math.abs((edgeLng - anchorLng) * meters.lonM));
+    const heightM = widthM / ratio;
+    const nextEdgeLng = anchorLng + lngSign * widthM / meters.lonM;
+    const halfHeightDeg = heightM / 2 / meters.latM;
+    return normalizeBBox({
+      south: centerLat - halfHeightDeg,
+      north: centerLat + halfHeightDeg,
+      west: Math.min(anchorLng, nextEdgeLng),
+      east: Math.max(anchorLng, nextEdgeLng),
+    });
+  }
+
+  function boundsWithDraggedEdge(name, latlng) {
+    return bboxToBounds(constrainBoxFromEdge(name, boundsToBBox(currentSelectionBounds()), latlng, aspectForMode()));
+  }
+
   function updateHandles(resetPositions = true) {
     if (!bboxRect) return;
     const bounds = currentSelectionBounds();
     const points = handlePoints(bounds);
+    const edgePoints = edgeHandlePoints(bounds);
 
     if (cornerMarkers.length === 0) {
       cornerMarkers = points.map(point => {
-        const marker = L.marker(point.latlng, {draggable: true, icon: cornerIcon, title: 'Drag to resize selection'}).addTo(map);
+        const marker = L.marker(point.latlng, {draggable: true, icon: cornerIcon, title: tr('Drag to resize selection')}).addTo(map);
         marker._cornerName = point.name;
         marker.on('drag', event => updateRectFromBounds(boundsWithDraggedCorner(event.target._cornerName, event.latlng)));
         marker.on('dragend', () => updateHandles(true));
@@ -1070,9 +1161,21 @@
       points.forEach((point, index) => cornerMarkers[index].setLatLng(point.latlng));
     }
 
+    if (edgeMarkers.length === 0) {
+      edgeMarkers = edgePoints.map(point => {
+        const marker = L.marker(point.latlng, {draggable: true, icon: point.icon, title: tr('Drag to resize selection edge')}).addTo(map);
+        marker._edgeName = point.name;
+        marker.on('drag', event => updateRectFromBounds(boundsWithDraggedEdge(event.target._edgeName, event.latlng)));
+        marker.on('dragend', () => updateHandles(true));
+        return marker;
+      });
+    } else if (resetPositions) {
+      edgePoints.forEach((point, index) => edgeMarkers[index].setLatLng(point.latlng));
+    }
+
     const center = bounds.getCenter();
     if (!moveMarker) {
-      moveMarker = L.marker(center, {draggable: true, icon: moveIcon, title: 'Drag to move selection'}).addTo(map);
+      moveMarker = L.marker(center, {draggable: true, icon: moveIcon, title: tr('Drag to move selection')}).addTo(map);
       moveMarker.on('mouseover', () => setSelectionKeyboardActive(true));
       moveMarker.on('dragstart', event => {
         setSelectionKeyboardActive(true);

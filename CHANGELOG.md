@@ -6,6 +6,13 @@ Time zone: local macOS time. Some early entries are reconstructed from request o
 
 ## 2026-07-01
 
+### 01:06 - Selection Edge Drag Handles
+
+- Added draggable handles on the north, east, south, and west edges of the map selection box.
+- Free selection mode now supports dragging a single side independently.
+- Fixed-ratio, circle, and hex selection modes keep their locked proportions when resizing from an edge.
+- Bumped the app version to `v0.36.3`.
+
 ### 00:53 - Preview Reset and Completion Timestamp
 
 - Added a `Reset position` button in the 3D preview toolbar to return the preview pan offset to the original centered position.
