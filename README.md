@@ -1,5 +1,20 @@
 # TopoTile Studio
 
+**Status:** Beta / Preview
+
+**License:** Source-available under CC BY-NC-SA 4.0. Personal, educational,
+research, and other non-commercial use only.
+
+**Author:** Made by Wenshuishi
+
+TopoTile Studio is not an OSI-approved open-source project. It is a
+source-available non-commercial project. Commercial use, resale, paid hosting,
+or paid derivative products require separate written permission from the author.
+
+TopoTile Studio 目前是 Beta / Preview 版本。本项目源码公开，但仅限个人、学习、
+研究和其它非商业用途使用。禁止商业使用、转售、付费部署或作为付费衍生产品提供；
+如需商业授权，请另行联系作者。
+
 ## Overview / 简介
 
 TopoTile Studio is a local web app that turns OpenStreetMap data and optional elevation data into 3D-printable city and terrain tiles. It is designed for practical desktop 3D printing workflows: select an area on the map, choose layers and road detail, generate a preview, then download slicer-friendly `.3mf`, `.glb`, `.stl`, or numbered chunk exports.
@@ -15,10 +30,6 @@ Key features / 主要功能：
 - Road-level selection, road cleanup presets, and separate footway/pedestrian widths / 支持道路级别选择、道路清理强度和步行道路独立宽度
 - Printability score, project save/load, cache cleanup, custom filenames, and numbered chunk exports / 支持可打印性评分、项目保存/加载、清理缓存、自定义文件名和分块编号导出
 - Cancellable generation jobs for stopping long OSM/terrain downloads or exports / 支持终止正在运行的生成任务，停止长时间 OSM/地形下载或导出
-
-A local web app for generating 3D-printable city and terrain models from OpenStreetMap vector data and an optional DEM GeoTIFF.
-
-The first target is Bambu Lab A1 printing: the app exports a standard `.3mf` file with separate objects for terrain, buildings, roads, water, green areas, and surface parking lots, plus a `.glb` preview file.
 
 ## What this version does
 
@@ -37,8 +48,11 @@ The first target is Bambu Lab A1 printing: the app exports a standard `.3mf` fil
 - Supports numbered chunk export with a ZIP bundle and manifest
 - Includes cache status and cleanup controls for generated jobs, OSM downloads, Open-Meteo elevation samples, and terrain tiles
 - Can stop the current generation job; completed cache entries are kept for reuse
+- Supports English and Chinese UI switching
+- Can export raised GPX/KML route tracks over terrain
+- Automatically applies common mesh repair before export
 - Downloads OSM features through Overpass API
-- Supports closed OSM water ways, water multipolygon relations, and coastline-derived ocean water when coastline data crosses the selection
+- Supports closed OSM water ways, water multipolygon relations, supplemental large-area water-boundary fetching, and coastline-derived ocean water when coastline data crosses the selection
 - Supports airport runways, taxiways, and aprons as a low printable pavement layer
 - Accepts an optional DEM GeoTIFF upload for terrain relief; uploaded DEMs override auto terrain
 - Generates a watertight terrain base
@@ -49,11 +63,13 @@ The first target is Bambu Lab A1 printing: the app exports a standard `.3mf` fil
 
 ## Current limits
 
-- OSM relation multipolygons are not fully reconstructed yet. Closed ways are supported well.
-- Water multipolygon relations are supported, but very large water bodies only appear when their relation boundary or coastline data is available in the selected area.
+- This is a Beta tool. It is useful, but not guaranteed to handle every map area or slicer edge case.
+- Large map selections can still hit public Overpass API rate limits or timeouts. Use smaller areas, caching, or self-hosted/third-party OSM services for heavy use.
+- OSM data completeness depends on local mapping quality. Missing OSM buildings, roads, water, or green areas cannot always be recovered automatically.
+- Water multipolygon relations and large water bodies are supported better than before, but extremely complex or incomplete OSM relations may still fail.
 - Normal auto terrain relief uses 90 m elevation data, so small curbs, stairs, and building-scale grade changes are not captured. Large Map Mode uses cached terrain GeoTIFF tiles instead.
-- Large Map Mode removes the Open-Meteo per-minute elevation bottleneck, but public Overpass OSM requests can still be slow for very dense 10 km+ city areas.
-- Terrain-following feature layers are simplified. Buildings and surface layers use local sampled terrain height near their centroid.
+- Terrain-following feature layers are simplified for printability.
+- Automatic mesh repair reduces common non-manifold issues, but does not guarantee every generated file is printable in every slicer.
 - Very large areas can be slow or too dense. Start with 0.5–2 km².
 
 ## Install
@@ -144,11 +160,47 @@ Data © OpenStreetMap contributors, available under the Open Database License.
 
 The app uses public Overpass API instances for OpenStreetMap feature downloads. Normal use does not require an API key or registration. Successful OSM responses are cached under `data/cache/osm/`; if a public Overpass server rejects a request, shrink the selection area or retry later.
 
+Public OpenStreetMap ecosystem services are not unlimited commercial backends.
+For heavy use, reduce request frequency, keep cache enabled, use third-party
+providers, or self-host the required services.
+
 If you upload a DEM, add the DEM source attribution in the UI field before generating.
 
 If you enable auto terrain relief, the app uses Open-Meteo Elevation API data based on Copernicus DEM GLO-90. Open-Meteo does not require an API key for this normal local use. Successful elevation batches are cached under `data/cache/elevation/open_meteo/`.
 
 If you enable Large Map Mode, the app uses Mapzen/AWS Terrain Tiles for elevation and stores them under `data/cache/terrain_tiles/`.
+
+See also:
+
+- `NOTICE.md` for license, attribution, public API usage, and third-party-name notices.
+- `DISCLAIMER.md` for model accuracy, printability, and data-completeness disclaimers.
+- OpenStreetMap copyright: https://www.openstreetmap.org/copyright
+- OSMF attribution guidelines: https://osmfoundation.org/wiki/Licence/Attribution_Guidelines
+- OSM tile usage policy: https://operations.osmfoundation.org/policies/tiles/
+- Nominatim usage policy: https://operations.osmfoundation.org/policies/nominatim/
+
+## License / 许可证
+
+This repository is source-available under the Creative Commons
+Attribution-NonCommercial-ShareAlike 4.0 International License
+(CC BY-NC-SA 4.0).
+
+本仓库源码公开，按 CC BY-NC-SA 4.0 授权，仅允许非商业用途。
+
+You may use, study, modify, and share the project for personal, educational,
+research, and other non-commercial purposes. If you share a modified version or
+derivative, it must be shared under the same license and include the
+corresponding modified source files.
+
+你可以为了个人、学习、研究和其它非商业目的使用、学习、修改和分享本项目。如果你公开分享修改版或衍生版本，
+必须使用相同许可证，并公开对应的修改后源码。
+
+Commercial use, resale, paid hosting, paid derivative products, or using a
+modified version as a commercial service are not permitted without separate
+written permission from the author.
+
+未经作者另行书面授权，禁止商业使用、转售、付费部署、作为付费衍生产品提供，
+或将修改版作为商业服务提供。
 
 ## Suggested workflow
 

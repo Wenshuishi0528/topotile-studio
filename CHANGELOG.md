@@ -6,6 +6,14 @@ Time zone: local macOS time. Some early entries are reconstructed from request o
 
 ## 2026-06-30
 
+### 23:31 - GitHub Publishing Legal Docs
+
+- Added `LICENSE` using CC BY-NC-SA 4.0 with explicit source-available, non-commercial, ShareAlike, and modified-source availability intent.
+- Added `NOTICE.md` with OSM attribution, public API usage notes, and third-party-name notices.
+- Added `DISCLAIMER.md` covering data accuracy, printability, and as-is use limitations.
+- Added `SECURITY.md` explaining local-only use and avoiding public internet exposure.
+- Updated the README with Beta status, bilingual license summary, public API limits, OSM attribution links, and legal document references.
+
 ### 21:49 - Large Area Infill and Water Recovery Fixes
 
 - Changed `All area polygons` infill so very large parent polygons are automatically skipped when they cover dense existing detail such as roads, buildings, water, green areas, parking, airport pavement, or smaller infill polygons.
