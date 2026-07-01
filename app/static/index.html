@@ -150,12 +150,13 @@
     .bbox-move-handle.keyboard-active {
       box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.22), 0 1px 5px rgba(15,23,42,.35);
     }
+    .dedication { margin: 18px 2px 2px; color: #64748b; font-size: 11px; line-height: 1.5; text-align: center; opacity: 0.78; }
     @media (max-width: 920px) { main { grid-template-columns: 1fr; } .panel { max-height: none; } .viewer { min-height: 560px; --map-pane-height: 320px; } .header-actions { position: static; margin-top: 8px; justify-content: space-between; } }
   </style>
 </head>
 <body>
 <header>
-  <h1>TopoTile Studio <span class="app-version" id="appVersionLabel">v0.36.3</span></h1>
+  <h1>TopoTile Studio <span class="app-version" id="appVersionLabel">v0.36.4</span></h1>
   <div class="header-actions">
     <div class="author-name">Made by Wenshuishi</div>
     <div class="language-switch" aria-label="Language">
@@ -340,6 +341,7 @@
     <div class="status" id="status">Idle.</div>
     <progress id="progress" value="0" max="1"></progress>
     <div class="downloads" id="downloads"></div>
+    <div class="dedication">献给我最爱的祖国 🇨🇳，也献给曾照亮我的那座暖山。</div>
   </section>
 
   <section class="viewer">
@@ -355,7 +357,7 @@
   </section>
 </main>
 <script>
-  const APP_VERSION = '0.36.3';
+  const APP_VERSION = '0.36.4';
   document.getElementById('appVersionLabel').textContent = `v${APP_VERSION}`;
 
   const LANGUAGE_STORAGE_KEY = 'topotile.language';

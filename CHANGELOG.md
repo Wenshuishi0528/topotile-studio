@@ -6,6 +6,11 @@ Time zone: local macOS time. Some early entries are reconstructed from request o
 
 ## 2026-07-01
 
+### 01:23 - Dedication Easter Egg
+
+- Added a subtle one-line dedication at the bottom of the left toolbar.
+- Bumped the app version to `v0.36.4`.
+
 ### 01:16 - Offline Test Button Placement
 
 - Moved the `Offline Test Model` button and helper text above the `Mesh repair` controls in the left toolbar.
