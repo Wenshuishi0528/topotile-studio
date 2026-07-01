@@ -54,6 +54,8 @@
     button { border: 0; border-radius: 8px; padding: 10px 12px; cursor: pointer; font-weight: 700; }
     .primary { background: #2563eb; color: white; width: 100%; margin-top: 14px; }
     .secondary { background: #e2e8f0; color: #1f2937; width: 100%; margin-top: 10px; }
+    .secondary.danger { background: #fee2e2; color: #991b1b; }
+    button:disabled { cursor: not-allowed; opacity: 0.58; }
     .search-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: end; }
     .search-row button { min-width: 82px; background: #2563eb; color: white; }
     .button-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
@@ -67,6 +69,7 @@
     .small { font-size: 12px; color: #64748b; margin-top: 6px; line-height: 1.45; }
     .status { margin-top: 14px; padding: 12px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; font-size: 13px; white-space: pre-wrap; }
     .status.failed { background: #fff7ed; border-color: #fed7aa; color: #9a3412; }
+    .status.cancelled { background: #f8fafc; border-color: #cbd5e1; color: #475569; }
     progress { width: 100%; height: 12px; margin-top: 8px; }
     .downloads a { display: inline-block; margin: 10px 8px 0 0; padding: 8px 10px; border-radius: 8px; background: #ecfdf3; color: #166534; text-decoration: none; font-weight: 700; font-size: 13px; }
     .download-primary { display: block; box-sizing: border-box; text-align: center; margin-top: 10px; padding: 11px 12px; border-radius: 8px; background: #16a34a; color: white; text-decoration: none; font-weight: 800; }
@@ -123,7 +126,7 @@
 </head>
 <body>
 <header>
-  <h1>TopoTile Studio <span class="app-version" id="appVersionLabel">v0.33.0</span></h1>
+  <h1>TopoTile Studio <span class="app-version" id="appVersionLabel">v0.34.0</span></h1>
   <div class="header-actions">
     <div class="author-name">Made by Wenshuishi</div>
     <div class="language-switch" aria-label="Language">
@@ -293,6 +296,7 @@
     <button class="primary" id="generate">Generate 3MF</button>
     <a class="download-primary disabled" id="download3mf" href="#" download>Download 3MF</a>
     <a class="download-primary alt disabled" id="downloadChunks" href="#" download>Download chunk ZIP</a>
+    <button class="secondary danger" id="cancelJob" type="button" disabled>Stop current job</button>
 
     <label>Maintenance</label>
     <div class="checks">
@@ -318,7 +322,7 @@
   </section>
 </main>
 <script>
-  const APP_VERSION = '0.33.0';
+  const APP_VERSION = '0.34.0';
   document.getElementById('appVersionLabel').textContent = `v${APP_VERSION}`;
 
   const LANGUAGE_STORAGE_KEY = 'topotile.language';
@@ -420,6 +424,7 @@
     'Generate 3MF': '生成 3MF',
     'Download 3MF': '下载 3MF',
     'Download chunk ZIP': '下载分块 ZIP',
+    'Stop current job': '终止当前任务',
     'Maintenance': '维护',
     'Include OSM cache': '包含 OSM 缓存',
     'Include elevation cache': '包含高程缓存',
@@ -492,6 +497,12 @@
     'Submitting sample job...': '正在提交样例任务...',
     'Sample submission failed': '样例任务提交失败',
     'Failed to submit sample: {message}': '提交样例失败：{message}',
+    'Cancelling...': '正在终止...',
+    'Cancelling': '正在终止',
+    'Cancelled': '已取消',
+    'Cancel failed': '终止失败',
+    'Cancel failed: {message}': '终止失败：{message}',
+    'Job cancellation requested. The current network request may finish before the job stops.': '已请求终止任务。当前网络请求可能需要返回后才会停止。',
     'Generated files: {generated}. OSM cache: {osm}. Elevation cache: {elevation}. Terrain cache: {terrain}.': '生成文件：{generated}。OSM 缓存：{osm}。高程缓存：{elevation}。地形缓存：{terrain}。',
     'Cache status failed': '缓存状态读取失败',
     'Cache status failed: {message}': '缓存状态读取失败：{message}',
@@ -571,6 +582,8 @@
   const STATUS_ZH = {
     queued: '排队中',
     running: '运行中',
+    cancelling: '正在终止',
+    cancelled: '已取消',
     complete: '完成',
     failed: '失败',
   };
@@ -634,6 +647,7 @@
     if (typeof updateRoadCleaningStatus === 'function') updateRoadCleaningStatus();
     if (typeof updateTerrainModeStatus === 'function') updateTerrainModeStatus();
     if (typeof updateRouteStatus === 'function') updateRouteStatus();
+    if (typeof updateJobControls === 'function') updateJobControls();
     if (typeof refreshCacheStatus === 'function') refreshCacheStatus();
   }
 
@@ -1527,6 +1541,57 @@
     return p;
   }
 
+  let activeJobId = null;
+  let cancelRequested = false;
+
+  function updateJobControls() {
+    const running = Boolean(activeJobId);
+    const cancelButton = document.getElementById('cancelJob');
+    document.getElementById('generate').disabled = running;
+    document.getElementById('sample').disabled = running;
+    cancelButton.disabled = !running || cancelRequested;
+    cancelButton.textContent = tr(cancelRequested ? 'Cancelling...' : 'Stop current job');
+  }
+
+  function beginJob(jobId) {
+    activeJobId = jobId;
+    cancelRequested = false;
+    updateJobControls();
+  }
+
+  function endJob(jobId) {
+    if (activeJobId === jobId) {
+      activeJobId = null;
+      cancelRequested = false;
+      updateJobControls();
+    }
+  }
+
+  async function cancelActiveJob() {
+    if (!activeJobId || cancelRequested) return;
+    const jobId = activeJobId;
+    const statusEl = document.getElementById('status');
+    cancelRequested = true;
+    updateJobControls();
+    try {
+      const res = await fetch(`/api/jobs/${jobId}/cancel`, {method: 'POST'});
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || tr('Cancel failed'));
+      if (activeJobId === jobId) {
+        statusEl.textContent = tr('{status}: {message}', {
+          status: trStatus(data.status || 'cancelling'),
+          message: tr(data.message || 'Job cancellation requested. The current network request may finish before the job stops.'),
+        });
+      }
+    } catch (err) {
+      if (activeJobId === jobId) {
+        cancelRequested = false;
+        updateJobControls();
+        statusEl.textContent += `\n${tr('Cancel failed: {message}', {message: err.message})}`;
+      }
+    }
+  }
+
   async function poll(jobId) {
     const statusEl = document.getElementById('status');
     const progress = document.getElementById('progress');
@@ -1538,6 +1603,11 @@
       const data = await res.json();
       progress.value = data.progress || 0;
       statusEl.classList.toggle('failed', data.status === 'failed');
+      statusEl.classList.toggle('cancelled', data.status === 'cancelled');
+      if (data.status === 'cancelling') {
+        cancelRequested = true;
+        updateJobControls();
+      }
       statusEl.textContent = tr('{status}: {message}', {
         status: trStatus(data.status),
         message: tr(data.message || ''),
@@ -1591,6 +1661,7 @@
           ${data.downloads.chunks_manifest ? `<a href="${data.downloads.chunks_manifest}">${tr('Chunk manifest')}</a>` : ''}
           <a href="${data.downloads.summary}">${tr('Summary')}</a>`;
         document.getElementById('preview').src = `${data.downloads.glb}?t=${Date.now()}`;
+        endJob(jobId);
         return;
       }
       if (data.status === 'failed') {
@@ -1601,6 +1672,16 @@
           statusEl.textContent += `\n\n${tr('Auto terrain uses a public elevation service and does not require registration. Turn it off or upload a DEM GeoTIFF if the service is busy.')}`;
         }
         downloads.innerHTML = data.error_log ? `<a href="${data.error_log}">${tr('Error log')}</a>` : '';
+        endJob(jobId);
+        return;
+      }
+      if (data.status === 'cancelled') {
+        downloads.innerHTML = '';
+        download3mf.href = '#';
+        download3mf.classList.add('disabled');
+        downloadChunks.href = '#';
+        downloadChunks.classList.add('disabled');
+        endJob(jobId);
         return;
       }
       await new Promise(resolve => setTimeout(resolve, 1200));
@@ -1618,7 +1699,7 @@
     downloadChunks.href = '#';
     downloadChunks.classList.add('disabled');
     document.getElementById('progress').value = 0;
-    statusEl.classList.remove('failed');
+    statusEl.classList.remove('failed', 'cancelled');
     statusEl.textContent = tr('Submitting job...');
     const form = new FormData();
     form.append('params', JSON.stringify(params()));
@@ -1630,10 +1711,14 @@
       const res = await fetch('/api/jobs', {method: 'POST', body: form});
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || tr('Job submission failed'));
+      beginJob(data.job_id);
       poll(data.job_id);
     } catch (err) {
       statusEl.classList.add('failed');
       statusEl.textContent = tr('Failed to submit: {message}', {message: err.message});
+      activeJobId = null;
+      cancelRequested = false;
+      updateJobControls();
     }
   });
 
@@ -1649,16 +1734,20 @@
     downloadChunks.href = '#';
     downloadChunks.classList.add('disabled');
     document.getElementById('progress').value = 0;
-    statusEl.classList.remove('failed');
+    statusEl.classList.remove('failed', 'cancelled');
     statusEl.textContent = tr('Submitting sample job...');
     try {
       const res = await fetch('/api/sample', {method: 'POST'});
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || tr('Sample submission failed'));
+      beginJob(data.job_id);
       poll(data.job_id);
     } catch (err) {
       statusEl.classList.add('failed');
       statusEl.textContent = tr('Failed to submit sample: {message}', {message: err.message});
+      activeJobId = null;
+      cancelRequested = false;
+      updateJobControls();
     }
   });
 
@@ -1725,6 +1814,7 @@
   }
 
   document.getElementById('clearCache').addEventListener('click', clearCache);
+  document.getElementById('cancelJob').addEventListener('click', cancelActiveJob);
   document.querySelectorAll('[data-lang-option]').forEach(button => {
     button.addEventListener('click', () => setLanguage(button.dataset.langOption));
   });

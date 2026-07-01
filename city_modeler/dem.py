@@ -9,6 +9,7 @@ import numpy as np
 from pyproj import Transformer
 import requests
 
+from .cancel import CancelCheck, check_cancel
 from .geo import LocalProjection, ModelScaler
 from .params import ModelParams
 
@@ -122,7 +123,14 @@ def make_flat_terrain(projection: LocalProjection, scaler: ModelScaler, params: 
     return TerrainGrid(x_mm=x_mm, y_mm=y_mm, z_mm=z_mm)
 
 
-def make_dem_terrain(dem_path: str | Path | None, projection: LocalProjection, scaler: ModelScaler, params: ModelParams) -> TerrainGrid:
+def make_dem_terrain(
+    dem_path: str | Path | None,
+    projection: LocalProjection,
+    scaler: ModelScaler,
+    params: ModelParams,
+    cancel_check: CancelCheck | None = None,
+) -> TerrainGrid:
+    check_cancel(cancel_check)
     if not dem_path:
         return make_flat_terrain(projection, scaler, params)
 
@@ -143,6 +151,7 @@ def make_dem_terrain(dem_path: str | Path | None, projection: LocalProjection, s
         sample_points = [to_dem.transform(lon, lat) for lon, lat in lonlat]
         values = []
         for sample in src.sample(sample_points):
+            check_cancel(cancel_check)
             value = float(sample[0])
             if src.nodata is not None and abs(value - float(src.nodata)) < 1e-9:
                 value = np.nan
@@ -206,9 +215,13 @@ def _save_open_meteo_cache(key: str, values: list[float]) -> None:
             pass
 
 
-def fetch_open_meteo_elevations(lonlat: list[tuple[float, float]]) -> list[float]:
+def fetch_open_meteo_elevations(
+    lonlat: list[tuple[float, float]],
+    cancel_check: CancelCheck | None = None,
+) -> list[float]:
     elevations: list[float] = []
     for chunk in _chunks(lonlat, 100):
+        check_cancel(cancel_check)
         cache_key = _open_meteo_cache_key(chunk)
         cached = _load_open_meteo_cache(cache_key, len(chunk))
         if cached is not None:
@@ -224,6 +237,7 @@ def fetch_open_meteo_elevations(lonlat: list[tuple[float, float]]) -> list[float
                 headers={"User-Agent": "TopoTile-Studio/0.1 (local desktop 3D-printing app)"},
                 timeout=(10, 60),
             )
+            check_cancel(cancel_check)
             if response.status_code >= 400:
                 excerpt = " ".join(response.text.split())[:240]
                 raise RuntimeError(f"HTTP {response.status_code} {excerpt}")
@@ -238,16 +252,23 @@ def fetch_open_meteo_elevations(lonlat: list[tuple[float, float]]) -> list[float
             raise RuntimeError("Open-Meteo elevation returned an unexpected response shape.")
         chunk_elevations: list[float] = []
         for value in values:
+            check_cancel(cancel_check)
             chunk_elevations.append(np.nan if value is None else float(value))
         _save_open_meteo_cache(cache_key, chunk_elevations)
         elevations.extend(chunk_elevations)
     return elevations
 
 
-def make_auto_elevation_terrain(projection: LocalProjection, scaler: ModelScaler, params: ModelParams) -> TerrainGrid:
+def make_auto_elevation_terrain(
+    projection: LocalProjection,
+    scaler: ModelScaler,
+    params: ModelParams,
+    cancel_check: CancelCheck | None = None,
+) -> TerrainGrid:
+    check_cancel(cancel_check)
     max_cells = min(params.terrain_grid_size, AUTO_ELEVATION_MAX_GRID_SIZE)
     xx_m, yy_m, lonlat = _terrain_grid_points(projection, scaler, max_cells)
-    values = fetch_open_meteo_elevations(lonlat)
+    values = fetch_open_meteo_elevations(lonlat, cancel_check=cancel_check)
     elev = np.array(values, dtype=float).reshape(xx_m.shape)
     terrain = _terrain_from_elevation(elev, xx_m, yy_m, scaler, params)
     if terrain is None:
@@ -268,9 +289,16 @@ def _terrain_tile_path(zoom: int, x: int, y: int) -> Path:
     return TERRAIN_TILE_CACHE / str(zoom) / str(x) / f"{y}.tif"
 
 
-def _download_terrain_tile(zoom: int, x: int, y: int) -> Path:
+def _download_terrain_tile(
+    zoom: int,
+    x: int,
+    y: int,
+    cancel_check: CancelCheck | None = None,
+) -> Path:
+    check_cancel(cancel_check)
     path = _terrain_tile_path(zoom, x, y)
     if path.exists() and path.stat().st_size > 0:
+        check_cancel(cancel_check)
         return path
     path.parent.mkdir(parents=True, exist_ok=True)
     url = TERRAIN_TILE_URL.format(z=zoom, x=x, y=y)
@@ -280,6 +308,7 @@ def _download_terrain_tile(zoom: int, x: int, y: int) -> Path:
             headers={"User-Agent": "TopoTile-Studio/0.1 (local desktop 3D-printing app)"},
             timeout=(10, 90),
         )
+        check_cancel(cancel_check)
         if response.status_code >= 400:
             excerpt = " ".join(response.text.split())[:240]
             raise RuntimeError(f"HTTP {response.status_code} {excerpt}")
@@ -291,7 +320,11 @@ def _download_terrain_tile(zoom: int, x: int, y: int) -> Path:
     return path
 
 
-def fetch_terrain_tile_elevations(lonlat: list[tuple[float, float]], zoom: int) -> list[float]:
+def fetch_terrain_tile_elevations(
+    lonlat: list[tuple[float, float]],
+    zoom: int,
+    cancel_check: CancelCheck | None = None,
+) -> list[float]:
     try:
         import rasterio
     except Exception as exc:  # pragma: no cover
@@ -304,11 +337,13 @@ def fetch_terrain_tile_elevations(lonlat: list[tuple[float, float]], zoom: int) 
 
     elevations = [np.nan] * len(lonlat)
     for (x, y), samples in grouped.items():
-        path = _download_terrain_tile(zoom, x, y)
+        check_cancel(cancel_check)
+        path = _download_terrain_tile(zoom, x, y, cancel_check=cancel_check)
         with rasterio.open(path) as src:
             to_tile = Transformer.from_crs("EPSG:4326", src.crs or "EPSG:3857", always_xy=True)
             points = [to_tile.transform(lon, lat) for _, lon, lat in samples]
             for (index, _, _), value in zip(samples, src.sample(points)):
+                check_cancel(cancel_check)
                 elevation = float(value[0])
                 if src.nodata is not None and abs(elevation - float(src.nodata)) < 1e-9:
                     elevation = np.nan
@@ -316,9 +351,15 @@ def fetch_terrain_tile_elevations(lonlat: list[tuple[float, float]], zoom: int) 
     return elevations
 
 
-def make_terrain_tile_terrain(projection: LocalProjection, scaler: ModelScaler, params: ModelParams) -> TerrainGrid:
+def make_terrain_tile_terrain(
+    projection: LocalProjection,
+    scaler: ModelScaler,
+    params: ModelParams,
+    cancel_check: CancelCheck | None = None,
+) -> TerrainGrid:
+    check_cancel(cancel_check)
     xx_m, yy_m, lonlat = _terrain_grid_points(projection, scaler, params.terrain_grid_size)
-    values = fetch_terrain_tile_elevations(lonlat, params.terrain_tile_zoom)
+    values = fetch_terrain_tile_elevations(lonlat, params.terrain_tile_zoom, cancel_check=cancel_check)
     elev = np.array(values, dtype=float).reshape(xx_m.shape)
     terrain = _terrain_from_elevation(elev, xx_m, yy_m, scaler, params)
     if terrain is None:
@@ -331,11 +372,13 @@ def make_terrain(
     projection: LocalProjection,
     scaler: ModelScaler,
     params: ModelParams,
+    cancel_check: CancelCheck | None = None,
 ) -> tuple[TerrainGrid, str]:
+    check_cancel(cancel_check)
     if dem_path:
-        return make_dem_terrain(dem_path, projection, scaler, params), "uploaded_dem"
+        return make_dem_terrain(dem_path, projection, scaler, params, cancel_check=cancel_check), "uploaded_dem"
     if params.auto_terrain and params.large_map_mode:
-        return make_terrain_tile_terrain(projection, scaler, params), "terrain_tiles"
+        return make_terrain_tile_terrain(projection, scaler, params, cancel_check=cancel_check), "terrain_tiles"
     if params.auto_terrain:
-        return make_auto_elevation_terrain(projection, scaler, params), "auto_elevation"
+        return make_auto_elevation_terrain(projection, scaler, params, cancel_check=cancel_check), "auto_elevation"
     return make_flat_terrain(projection, scaler, params), "flat"

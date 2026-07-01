@@ -1,6 +1,7 @@
 import requests
 import pytest
 
+from city_modeler.cancel import GenerationCancelled
 from city_modeler import osm
 
 
@@ -207,3 +208,16 @@ def test_fetch_osm_json_raises_clear_message(monkeypatch):
     assert "No API key is required" in message
     assert "try a smaller map selection" in message
     assert "HTTP 429" in message
+
+
+def test_fetch_osm_json_honors_cancel_check_before_network(monkeypatch):
+    def fake_post(*args, **kwargs):
+        raise AssertionError("Overpass should not be called after cancellation")
+
+    def cancel_now():
+        raise GenerationCancelled("Cancelled")
+
+    monkeypatch.setattr(requests, "post", fake_post)
+
+    with pytest.raises(GenerationCancelled):
+        osm.fetch_osm_json(47.62, -122.355, 47.626, -122.3455, cancel_check=cancel_now)

@@ -1,6 +1,9 @@
 from pathlib import Path
 import zipfile
 
+import pytest
+
+from city_modeler.cancel import GenerationCancelled
 from city_modeler.params import ModelParams
 from city_modeler.pipeline import generate_model, generate_sample, make_synthetic_osm_json
 from city_modeler.export_3mf import validate_3mf
@@ -158,3 +161,18 @@ def test_generate_numbered_chunk_export(tmp_path: Path):
     assert "campus_tile_chunks_manifest.json" in names
     assert "campus_tile_r01_c01.3mf" in names
     validate_3mf(tmp_path / "chunks" / "r01_c01" / "campus_tile_r01_c01.3mf")
+
+
+def test_generate_model_honors_cancel_check(tmp_path: Path):
+    params = ModelParams(
+        south=47.6200,
+        west=-122.3550,
+        north=47.6260,
+        east=-122.3455,
+    )
+
+    def cancel_now():
+        raise GenerationCancelled("Cancelled")
+
+    with pytest.raises(GenerationCancelled):
+        generate_model(params, tmp_path, osm_json_override={"elements": []}, cancel_check=cancel_now)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future
 from pathlib import Path
 from threading import Lock
 from urllib.parse import quote
@@ -15,6 +16,7 @@ from fastapi import Body, FastAPI, UploadFile, File, Form, HTTPException, Query
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
+from city_modeler.cancel import GenerationCancelled
 from city_modeler.params import ModelParams
 from city_modeler.pipeline import generate_model, generate_sample
 from city_modeler.routes import parse_route_text
@@ -34,6 +36,8 @@ CACHE_DIR.mkdir(parents=True, exist_ok=True)
 executor = ThreadPoolExecutor(max_workers=1)
 ACTIVE_JOBS: set[str] = set()
 ACTIVE_JOBS_LOCK = Lock()
+JOB_FUTURES: dict[str, Future] = {}
+JOB_FUTURES_LOCK = Lock()
 
 app = FastAPI(title="TopoTile Studio")
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
@@ -47,6 +51,10 @@ def job_dir(job_id: str) -> Path:
 
 def status_path(job_id: str) -> Path:
     return job_dir(job_id) / "status.json"
+
+
+def cancel_path(job_id: str) -> Path:
+    return job_dir(job_id) / "cancel.requested"
 
 
 def write_status(job_id: str, status: dict[str, Any]) -> None:
@@ -136,7 +144,38 @@ def active_generated_job_count() -> int:
 
 def submit_job(job_id: str, fn, *args) -> None:
     mark_job_active(job_id)
-    executor.submit(fn, job_id, *args)
+    future = executor.submit(fn, job_id, *args)
+    with JOB_FUTURES_LOCK:
+        JOB_FUTURES[job_id] = future
+
+    def cleanup_future(_future: Future) -> None:
+        with JOB_FUTURES_LOCK:
+            JOB_FUTURES.pop(job_id, None)
+        if _future.cancelled():
+            mark_job_inactive(job_id)
+
+    future.add_done_callback(cleanup_future)
+
+
+def cleanup_job_outputs(job_id: str) -> None:
+    shutil.rmtree(OUTPUTS_DIR / job_id, ignore_errors=True)
+
+
+def request_job_cancel(job_id: str) -> None:
+    cancel_path(job_id).write_text("cancel requested\n", encoding="utf-8")
+
+
+def is_cancel_requested(job_id: str) -> bool:
+    return cancel_path(job_id).exists()
+
+
+def raise_if_cancelled(job_id: str) -> None:
+    if is_cancel_requested(job_id):
+        raise GenerationCancelled("Cancelled")
+
+
+def terminal_status(status: str) -> bool:
+    return status in {"complete", "failed", "cancelled"}
 
 
 def clear_directory_contents(path: Path) -> int:
@@ -189,14 +228,23 @@ def run_job(job_id: str, params_data: dict[str, Any], dem_path: str | None) -> N
     out.mkdir(parents=True, exist_ok=True)
 
     def progress(message: str, value: float) -> None:
+        raise_if_cancelled(job_id)
         current = read_status(job_id)
         current.update({"status": "running", "message": message, "progress": value})
         write_status(job_id, current)
 
     try:
+        raise_if_cancelled(job_id)
         params = ModelParams.from_dict(params_data)
         (jd / "params.json").write_text(json.dumps(params_data, indent=2), encoding="utf-8")
-        summary = generate_model(params, out, dem_path=dem_path, progress=progress)
+        summary = generate_model(
+            params,
+            out,
+            dem_path=dem_path,
+            progress=progress,
+            cancel_check=lambda: raise_if_cancelled(job_id),
+        )
+        raise_if_cancelled(job_id)
         write_status(job_id, {
             "job_id": job_id,
             "status": "complete",
@@ -204,6 +252,16 @@ def run_job(job_id: str, params_data: dict[str, Any], dem_path: str | None) -> N
             "progress": 1.0,
             "summary": summary,
             "downloads": job_downloads(job_id, summary),
+        })
+    except GenerationCancelled:
+        cleanup_job_outputs(job_id)
+        current = read_status(job_id)
+        write_status(job_id, {
+            "job_id": job_id,
+            "status": "cancelled",
+            "message": "Cancelled",
+            "progress": current.get("progress", 0.0),
+            "cancel_requested": True,
         })
     except Exception as exc:
         tb = traceback.format_exc()
@@ -223,8 +281,10 @@ def run_sample_job(job_id: str) -> None:
     out = OUTPUTS_DIR / job_id
     out.mkdir(parents=True, exist_ok=True)
     try:
+        raise_if_cancelled(job_id)
         write_status(job_id, {"job_id": job_id, "status": "running", "message": "Preparing built-in offline test model", "progress": 0.2})
-        summary = generate_sample(out)
+        summary = generate_sample(out, cancel_check=lambda: raise_if_cancelled(job_id))
+        raise_if_cancelled(job_id)
         write_status(job_id, {
             "job_id": job_id,
             "status": "complete",
@@ -232,6 +292,16 @@ def run_sample_job(job_id: str) -> None:
             "progress": 1.0,
             "summary": summary,
             "downloads": job_downloads(job_id, summary),
+        })
+    except GenerationCancelled:
+        cleanup_job_outputs(job_id)
+        current = read_status(job_id)
+        write_status(job_id, {
+            "job_id": job_id,
+            "status": "cancelled",
+            "message": "Cancelled",
+            "progress": current.get("progress", 0.0),
+            "cancel_requested": True,
         })
     except Exception as exc:
         tb = traceback.format_exc()
@@ -370,6 +440,38 @@ def geocode(q: str = Query(..., min_length=2, max_length=220)) -> dict[str, Any]
 @app.get("/api/jobs/{job_id}")
 def get_job(job_id: str) -> dict[str, Any]:
     return read_status(job_id)
+
+
+@app.post("/api/jobs/{job_id}/cancel")
+def cancel_job(job_id: str) -> dict[str, Any]:
+    current = read_status(job_id)
+    if terminal_status(str(current.get("status", ""))):
+        return current
+
+    request_job_cancel(job_id)
+    with JOB_FUTURES_LOCK:
+        future = JOB_FUTURES.get(job_id)
+
+    if future is not None and future.cancel():
+        cleanup_job_outputs(job_id)
+        mark_job_inactive(job_id)
+        cancelled = {
+            "job_id": job_id,
+            "status": "cancelled",
+            "message": "Cancelled",
+            "progress": current.get("progress", 0.0),
+            "cancel_requested": True,
+        }
+        write_status(job_id, cancelled)
+        return cancelled
+
+    current.update({
+        "status": "cancelling",
+        "message": "Cancelling",
+        "cancel_requested": True,
+    })
+    write_status(job_id, current)
+    return current
 
 
 @app.get("/api/cache/status")

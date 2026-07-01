@@ -18,6 +18,14 @@ class FakeResponse:
         return self._payload
 
 
+class FakeFuture:
+    def __init__(self, can_cancel: bool):
+        self.can_cancel = can_cancel
+
+    def cancel(self) -> bool:
+        return self.can_cancel
+
+
 def test_geocode_uses_nominatim_with_user_agent(monkeypatch):
     calls = []
 
@@ -169,3 +177,66 @@ def test_create_job_parses_uploaded_route_file(tmp_path, monkeypatch):
     assert captured["params_data"]["route_name"] == "walk.gpx"
     assert captured["params_data"]["route_segments"] == [[[47.62, -122.35], [47.621, -122.349]]]
     assert (jobs / captured["job_id"] / "route.gpx").exists()
+
+
+def test_cancel_running_job_marks_cancelling(tmp_path, monkeypatch):
+    jobs = tmp_path / "jobs"
+    outputs = tmp_path / "outputs"
+    cache = tmp_path / "cache"
+    for path in (jobs, outputs, cache):
+        path.mkdir(parents=True)
+
+    monkeypatch.setattr(main, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(main, "JOBS_DIR", jobs)
+    monkeypatch.setattr(main, "OUTPUTS_DIR", outputs)
+    monkeypatch.setattr(main, "CACHE_DIR", cache)
+    with main.ACTIVE_JOBS_LOCK:
+        main.ACTIVE_JOBS.clear()
+        main.ACTIVE_JOBS.add("job123")
+    with main.JOB_FUTURES_LOCK:
+        main.JOB_FUTURES.clear()
+        main.JOB_FUTURES["job123"] = FakeFuture(can_cancel=False)
+
+    main.write_status("job123", {"job_id": "job123", "status": "running", "message": "Loading OpenStreetMap data", "progress": 0.28})
+
+    result = main.cancel_job("job123")
+
+    assert result["status"] == "cancelling"
+    assert result["cancel_requested"] is True
+    assert (jobs / "job123" / "cancel.requested").exists()
+    assert "job123" in main.ACTIVE_JOBS
+    with main.ACTIVE_JOBS_LOCK:
+        main.ACTIVE_JOBS.clear()
+    with main.JOB_FUTURES_LOCK:
+        main.JOB_FUTURES.clear()
+
+
+def test_cancel_queued_job_marks_cancelled_and_removes_outputs(tmp_path, monkeypatch):
+    jobs = tmp_path / "jobs"
+    outputs = tmp_path / "outputs"
+    cache = tmp_path / "cache"
+    for path in (jobs, outputs / "job456", cache):
+        path.mkdir(parents=True)
+    (outputs / "job456" / "partial.3mf").write_text("partial", encoding="utf-8")
+
+    monkeypatch.setattr(main, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(main, "JOBS_DIR", jobs)
+    monkeypatch.setattr(main, "OUTPUTS_DIR", outputs)
+    monkeypatch.setattr(main, "CACHE_DIR", cache)
+    with main.ACTIVE_JOBS_LOCK:
+        main.ACTIVE_JOBS.clear()
+        main.ACTIVE_JOBS.add("job456")
+    with main.JOB_FUTURES_LOCK:
+        main.JOB_FUTURES.clear()
+        main.JOB_FUTURES["job456"] = FakeFuture(can_cancel=True)
+
+    main.write_status("job456", {"job_id": "job456", "status": "queued", "message": "Queued", "progress": 0.0})
+
+    result = main.cancel_job("job456")
+
+    assert result["status"] == "cancelled"
+    assert result["cancel_requested"] is True
+    assert not (outputs / "job456").exists()
+    assert "job456" not in main.ACTIVE_JOBS
+    with main.JOB_FUTURES_LOCK:
+        main.JOB_FUTURES.clear()

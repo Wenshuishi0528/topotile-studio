@@ -11,6 +11,7 @@ from shapely.geometry import Polygon, LineString, Point
 from shapely.geometry.base import BaseGeometry
 from shapely.validation import make_valid
 
+from .cancel import CancelCheck, check_cancel
 from .chunks import ChunkExportEntry, chunk_summary, write_chunk_manifest, write_chunk_zip
 from .dem import AUTO_ELEVATION_ATTRIBUTION, TERRAIN_TILE_ATTRIBUTION, make_terrain
 from .export_3mf import write_3mf, validate_3mf
@@ -143,7 +144,9 @@ def export_chunk_models(
     dem_path: str | Path | None,
     osm_json: dict[str, Any],
     full_scale_mm_per_m: float,
+    cancel_check: CancelCheck | None = None,
 ) -> dict[str, Any] | None:
+    check_cancel(cancel_check)
     if not params.chunk_export or params.chunk_rows * params.chunk_cols <= 1:
         return None
 
@@ -153,6 +156,7 @@ def export_chunk_models(
     base_name = safe_output_stem(params.output_name)
 
     for row, col, bbox in chunk_bboxes(params):
+        check_cancel(cancel_check)
         south, west, north, east = bbox
         chunk_projection = make_local_projection(south, west, north, east)
         chunk_max_size_mm = max(chunk_projection.width_m, chunk_projection.height_m) * full_scale_mm_per_m
@@ -175,7 +179,9 @@ def export_chunk_models(
             dem_path=dem_path,
             osm_json_override=osm_json,
             progress=None,
+            cancel_check=cancel_check,
         )
+        check_cancel(cancel_check)
         filename = str(summary["files"]["3mf"])
         src = chunk_dir / filename
         entries.append(ChunkExportEntry(
@@ -200,16 +206,19 @@ def generate_model(
     osm_json_path: str | Path | None = None,
     osm_json_override: dict[str, Any] | None = None,
     progress: Progress | None = None,
+    cancel_check: CancelCheck | None = None,
 ) -> dict[str, Any]:
     start = time.time()
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    check_cancel(cancel_check)
     _progress(progress, "Projecting selected area", 0.05)
     projection = make_local_projection(params.south, params.west, params.north, params.east)
     scaler = make_scaler(projection.width_m, projection.height_m, params.max_size_mm)
     footprint_m = footprint_polygon_m(params, projection.width_m, projection.height_m)
     footprint_mm = footprint_polygon_mm(footprint_m, scaler)
+    check_cancel(cancel_check)
 
     terrain_message = "Loading uploaded DEM terrain" if dem_path else (
         "Downloading terrain tiles" if params.auto_terrain and params.large_map_mode else (
@@ -217,7 +226,8 @@ def generate_model(
         )
     )
     _progress(progress, terrain_message, 0.15)
-    terrain, terrain_source = make_terrain(dem_path, projection, scaler, params)
+    terrain, terrain_source = make_terrain(dem_path, projection, scaler, params, cancel_check=cancel_check)
+    check_cancel(cancel_check)
 
     _progress(progress, "Loading OpenStreetMap data", 0.28)
     if osm_json_override is not None:
@@ -238,12 +248,22 @@ def generate_model(
                 params.osm_overpass_url,
                 tile_size_km=params.osm_tile_size_km,
                 progress=osm_progress,
+                cancel_check=cancel_check,
             )
         else:
-            osm_json = fetch_osm_json(params.south, params.west, params.north, params.east, params.osm_overpass_url)
+            osm_json = fetch_osm_json(
+                params.south,
+                params.west,
+                params.north,
+                params.east,
+                params.osm_overpass_url,
+                cancel_check=cancel_check,
+            )
+        check_cancel(cancel_check)
         save_osm_json(osm_json, output_dir / "osm_raw.json")
 
     _progress(progress, "Parsing OSM features", 0.40)
+    check_cancel(cancel_check)
     features = parse_osm_features(osm_json, projection)
     clip_m: BaseGeometry = footprint_m if footprint_m is not None else rectangle_polygon_m(projection.width_m, projection.height_m)
     features = clip_features_to_footprint(features, clip_m)
@@ -264,11 +284,13 @@ def generate_model(
 
     if params.include_buildings:
         _progress(progress, f"Extruding {len(buildings)} building features", 0.55)
+        check_cancel(cancel_check)
         building_part = build_building_meshes(buildings, scaler, terrain, params)
         if not building_part.is_empty():
             parts.append(building_part)
 
     _progress(progress, "Building roads, water, green, parking, airport, and area infill layers", 0.70)
+    check_cancel(cancel_check)
     parts.extend(build_surface_layer_meshes(
         roads,
         water,
@@ -283,25 +305,31 @@ def generate_model(
     ))
     if params.include_route:
         _progress(progress, f"Building route track layer from {route_point_count(params.route_segments)} points", 0.76)
+        check_cancel(cancel_check)
         route_water_union = water_union_geometry_m(water, scaler, params) if params.cut_out_water else None
         route_part = build_route_meshes(route_lines, scaler, terrain, params, route_water_union)
         if not route_part.is_empty():
             parts.append(route_part)
+    check_cancel(cancel_check)
     parts = [p.cleaned() for p in parts if not p.cleaned().is_empty()]
 
     if not parts:
         raise RuntimeError("Generation produced no mesh parts.")
 
     _progress(progress, "Repairing mesh geometry", 0.82)
+    check_cancel(cancel_check)
     parts, mesh_repair = repair_mesh_parts(parts, enabled=params.auto_repair_mesh)
     parts = [p.cleaned() for p in parts if not p.cleaned().is_empty()]
     if not parts:
         raise RuntimeError("Mesh repair removed all geometry.")
 
     _progress(progress, "Writing 3MF and GLB files", 0.88)
+    check_cancel(cancel_check)
     base_name = safe_output_stem(params.output_name)
     path_3mf = write_3mf(parts, output_dir / f"{base_name}.3mf", title=params.project_name)
+    check_cancel(cancel_check)
     path_glb = write_glb(parts, output_dir / f"{base_name}.glb")
+    check_cancel(cancel_check)
     path_stl = write_stl(parts, output_dir / f"{base_name}.stl")
     attribution = attribution_text(params, terrain_source=terrain_source)
     path_attr = output_dir / "ATTRIBUTION.txt"
@@ -371,7 +399,7 @@ def generate_model(
 
     if params.chunk_export and params.chunk_rows * params.chunk_cols > 1:
         _progress(progress, f"Writing {params.chunk_rows * params.chunk_cols} chunk exports", 0.94)
-        chunk_data = export_chunk_models(params, output_dir, dem_path, osm_json, scaler.scale_mm_per_m)
+        chunk_data = export_chunk_models(params, output_dir, dem_path, osm_json, scaler.scale_mm_per_m, cancel_check=cancel_check)
         if chunk_data:
             summary["chunk_export"] = chunk_data
             summary["files"]["chunks_zip"] = chunk_data["zip"]
@@ -384,6 +412,7 @@ def generate_model(
             "pieces": 0,
         }
 
+    check_cancel(cancel_check)
     summary["printability"] = printability_report(params, summary)
     (output_dir / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     _progress(progress, "Done", 1.0)
@@ -432,10 +461,11 @@ def make_synthetic_osm_json(south: float, west: float, north: float, east: float
     return {"version": 0.6, "generator": "synthetic", "elements": elements}
 
 
-def generate_sample(output_dir: str | Path) -> dict[str, Any]:
+def generate_sample(output_dir: str | Path, cancel_check: CancelCheck | None = None) -> dict[str, Any]:
     start = time.time()
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    check_cancel(cancel_check)
     if not OFFLINE_SAMPLE_3MF.exists() or not OFFLINE_SAMPLE_PROJECT.exists():
         raise FileNotFoundError("Bundled offline test model files are missing.")
 
@@ -459,6 +489,7 @@ def generate_sample(output_dir: str | Path) -> dict[str, Any]:
     scene = trimesh.load(OFFLINE_SAMPLE_3MF, force="scene", process=False)
     parts: list[MeshPart] = []
     for name, mesh in scene.geometry.items():
+        check_cancel(cancel_check)
         vertices = np.asarray(mesh.vertices, dtype=float)
         faces = np.asarray(mesh.faces, dtype=np.int64)
         part_name = str(name or "sample")
@@ -472,8 +503,11 @@ def generate_sample(output_dir: str | Path) -> dict[str, Any]:
     scaler = make_scaler(projection.width_m, projection.height_m, params.max_size_mm)
 
     path_3mf = write_3mf(parts, output_dir / f"{base_name}.3mf", title=params.project_name)
+    check_cancel(cancel_check)
     path_glb = write_glb(parts, output_dir / f"{base_name}.glb")
+    check_cancel(cancel_check)
     path_stl = write_stl(parts, output_dir / f"{base_name}.stl")
+    check_cancel(cancel_check)
     path_project = output_dir / f"{base_name}_project.json"
     path_project.write_text(json.dumps(saved_project, ensure_ascii=False, indent=2), encoding="utf-8")
     path_attr = output_dir / "ATTRIBUTION.txt"

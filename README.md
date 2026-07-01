@@ -14,6 +14,7 @@ Key features / 主要功能：
 - Water cutout mode for hollow water areas / 支持水体镂空模式，便于下方放置蓝色纸片或材料
 - Road-level selection, road cleanup presets, and separate footway/pedestrian widths / 支持道路级别选择、道路清理强度和步行道路独立宽度
 - Printability score, project save/load, cache cleanup, custom filenames, and numbered chunk exports / 支持可打印性评分、项目保存/加载、清理缓存、自定义文件名和分块编号导出
+- Cancellable generation jobs for stopping long OSM/terrain downloads or exports / 支持终止正在运行的生成任务，停止长时间 OSM/地形下载或导出
 
 A local web app for generating 3D-printable city and terrain models from OpenStreetMap vector data and an optional DEM GeoTIFF.
 
@@ -35,6 +36,7 @@ The first target is Bambu Lab A1 printing: the app exports a standard `.3mf` fil
 - Supports custom export filenames
 - Supports numbered chunk export with a ZIP bundle and manifest
 - Includes cache status and cleanup controls for generated jobs, OSM downloads, Open-Meteo elevation samples, and terrain tiles
+- Can stop the current generation job; completed cache entries are kept for reuse
 - Downloads OSM features through Overpass API
 - Supports closed OSM water ways, water multipolygon relations, and coastline-derived ocean water when coastline data crosses the selection
 - Supports airport runways, taxiways, and aprons as a low printable pavement layer

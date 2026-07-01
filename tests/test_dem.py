@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
 
+from city_modeler.cancel import GenerationCancelled
 from city_modeler import dem
 from city_modeler.dem import TerrainGrid, fetch_open_meteo_elevations, lonlat_to_tile, make_auto_elevation_terrain, make_terrain
 from city_modeler.geo import make_local_projection, make_scaler
@@ -117,7 +118,7 @@ def test_large_map_without_auto_terrain_stays_flat(monkeypatch):
 
 
 def test_large_map_with_auto_terrain_uses_terrain_tiles(monkeypatch):
-    def fake_terrain_tiles(_projection, _scaler, params):
+    def fake_terrain_tiles(_projection, _scaler, params, **_kwargs):
         return TerrainGrid(
             x_mm=np.asarray([[0.0, 10.0], [0.0, 10.0]]),
             y_mm=np.asarray([[0.0, 0.0], [10.0, 10.0]]),
@@ -140,3 +141,16 @@ def test_large_map_with_auto_terrain_uses_terrain_tiles(monkeypatch):
 
     assert source == "terrain_tiles"
     assert float(np.ptp(terrain.z_mm)) == 3.0
+
+
+def test_fetch_open_meteo_elevations_honors_cancel_check_before_network(monkeypatch):
+    def fake_get(*args, **kwargs):
+        raise AssertionError("Open-Meteo should not be called after cancellation")
+
+    def cancel_now():
+        raise GenerationCancelled("Cancelled")
+
+    monkeypatch.setattr("requests.get", fake_get)
+
+    with pytest.raises(GenerationCancelled):
+        fetch_open_meteo_elevations([(-122.0, 47.0)], cancel_check=cancel_now)

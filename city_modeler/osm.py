@@ -14,6 +14,7 @@ from shapely.geometry.base import BaseGeometry
 from shapely.ops import polygonize, unary_union
 from shapely.validation import make_valid
 
+from .cancel import CancelCheck, check_cancel
 from .geo import LocalProjection
 
 DEFAULT_OVERPASS_URL = "https://overpass-api.de/api/interpreter"
@@ -155,11 +156,14 @@ def fetch_osm_json(
     overpass_url: str = DEFAULT_OVERPASS_URL,
     overpass_timeout_s: int = 90,
     read_timeout_s: int = 120,
+    cancel_check: CancelCheck | None = None,
 ) -> dict[str, Any]:
+    check_cancel(cancel_check)
     query = overpass_query(south, west, north, east, timeout_s=overpass_timeout_s)
     cache_key = _osm_cache_key(south, west, north, east)
     cached = _load_osm_cache(cache_key)
     if cached is not None:
+        check_cancel(cancel_check)
         return cached
 
     urls = [overpass_url]
@@ -172,8 +176,10 @@ def fetch_osm_json(
         "Accept": "application/json",
     }
     for url in urls:
+        check_cancel(cancel_check)
         try:
             response = requests.post(url, data={"data": query}, headers=headers, timeout=(10, read_timeout_s))
+            check_cancel(cancel_check)
             if response.status_code >= 400:
                 excerpt = " ".join(response.text.split())[:320]
                 errors.append(f"{url}: HTTP {response.status_code} {excerpt}")
@@ -260,15 +266,29 @@ def _fetch_tile_recursive(
     east: float,
     overpass_url: str,
     depth: int = 0,
+    cancel_check: CancelCheck | None = None,
 ) -> dict[str, Any]:
+    check_cancel(cancel_check)
     last_error = ""
     for attempt in range(TILED_FETCH_ATTEMPTS):
+        check_cancel(cancel_check)
         try:
-            return fetch_osm_json(south, west, north, east, overpass_url, overpass_timeout_s=45, read_timeout_s=70)
+            return fetch_osm_json(
+                south,
+                west,
+                north,
+                east,
+                overpass_url,
+                overpass_timeout_s=45,
+                read_timeout_s=70,
+                cancel_check=cancel_check,
+            )
         except OverpassFetchError as exc:
             last_error = str(exc)
             if attempt + 1 < TILED_FETCH_ATTEMPTS:
+                check_cancel(cancel_check)
                 time.sleep(0.8 + attempt * 0.8)
+                check_cancel(cancel_check)
 
     if depth >= TILED_FETCH_MAX_DEPTH:
         raise OverpassFetchError(last_error or "OpenStreetMap tile download failed.")
@@ -276,12 +296,19 @@ def _fetch_tile_recursive(
     merged: dict[tuple[str, str], dict[str, Any]] = {}
     child_errors: list[str] = []
     for child in _split_bbox(south, west, north, east):
+        check_cancel(cancel_check)
         try:
-            child_data = _fetch_tile_recursive(*child, overpass_url=overpass_url, depth=depth + 1)
+            child_data = _fetch_tile_recursive(
+                *child,
+                overpass_url=overpass_url,
+                depth=depth + 1,
+                cancel_check=cancel_check,
+            )
         except OverpassFetchError as exc:
             child_errors.append(str(exc))
             continue
         _merge_best_elements(merged, child_data.get("elements", []))
+        check_cancel(cancel_check)
 
     if child_errors:
         detail = "; ".join(child_errors[:4])
@@ -304,23 +331,28 @@ def fetch_osm_json_tiled(
     overpass_url: str = DEFAULT_OVERPASS_URL,
     tile_size_km: float = 2.5,
     progress: Progress | None = None,
+    cancel_check: CancelCheck | None = None,
 ) -> dict[str, Any]:
+    check_cancel(cancel_check)
     tiles = _bbox_tiles(south, west, north, east, tile_size_km)
     elements_by_id: dict[tuple[str, str], dict[str, Any]] = {}
     errors: list[str] = []
 
     for index, (ts, tw, tn, te) in enumerate(tiles, start=1):
+        check_cancel(cancel_check)
         if progress:
             progress(f"Loading OpenStreetMap tile {index}/{len(tiles)}", (index - 1) / len(tiles))
         try:
-            data = _fetch_tile_recursive(ts, tw, tn, te, overpass_url)
+            data = _fetch_tile_recursive(ts, tw, tn, te, overpass_url, cancel_check=cancel_check)
         except OverpassFetchError as exc:
             if len(tiles) == 1:
                 raise
             errors.append(f"tile {index}/{len(tiles)}: {exc}")
             continue
         _merge_best_elements(elements_by_id, data.get("elements", []))
+        check_cancel(cancel_check)
         time.sleep(0.15)
+        check_cancel(cancel_check)
 
     elements = list(elements_by_id.values())
     if progress:

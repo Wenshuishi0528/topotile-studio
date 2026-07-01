@@ -6,6 +6,15 @@ Time zone: local macOS time. Some early entries are reconstructed from request o
 
 ## 2026-06-30
 
+### 20:17 - Cancel Running Generation
+
+- Added a `Stop current job` control that can cancel the active generation from the web UI.
+- Added `POST /api/jobs/{job_id}/cancel` with queued-job cancellation and running-job cooperative cancellation.
+- Threaded cancellation checks through OSM tiled downloads, Open-Meteo elevation batches, terrain tile downloads, model generation, mesh repair/export checkpoints, chunk export, and the bundled offline sample.
+- Cancelled jobs now clean incomplete output files while keeping reusable OSM/elevation/terrain cache data.
+- Added English/Chinese UI text for cancelling/cancelled states.
+- Bumped the app version to `v0.34.0`.
+
 ### 17:46 - English/Chinese Interface Toggle
 
 - Added a header language switch for English and Chinese UI text.
