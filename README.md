@@ -1,5 +1,8 @@
 # TopoTile Studio
 
+<img width="2444" height="2108" alt="截屏2026-06-30 23 48 52" src="https://github.com/user-attachments/assets/b2975ad5-9beb-4719-9956-50dcbf902c56" />
+
+
 **Status:** Beta / Preview
 
 **License:** Source-available under CC BY-NC-SA 4.0. Personal, educational,
