@@ -27,6 +27,7 @@ COLORS = {
     "parking": (168, 168, 156, 255),
     "airport": (168, 168, 156, 255),
     "area_infill": (176, 164, 138, 255),
+    "route": (220, 58, 48, 255),
 }
 
 MIN_PRINTABLE_HOLE_AREA_MM2 = 1e-3
@@ -906,6 +907,8 @@ def _road_segment_part(
     thickness_mm: float,
     z_offset_mm: float,
     bridge_offset_mm: float = 0.0,
+    name: str = "road",
+    color: tuple[int, int, int, int] = COLORS["roads"],
 ) -> MeshPart:
     x0, y0 = p0
     x1, y1 = p1
@@ -913,7 +916,7 @@ def _road_segment_part(
     dy = y1 - y0
     length = math.hypot(dx, dy)
     if length < max(0.10, width_mm * 0.15):
-        return MeshPart("road", np.zeros((0, 3)), np.zeros((0, 3), dtype=np.int64), COLORS["roads"])
+        return MeshPart(name, np.zeros((0, 3)), np.zeros((0, 3), dtype=np.int64), color)
 
     nx = -dy / length
     ny = dx / length
@@ -942,7 +945,7 @@ def _road_segment_part(
         (2, 6, 7), (2, 7, 3),
         (3, 7, 4), (3, 4, 0),
     ], dtype=np.int64)
-    return MeshPart("road", vertices, faces, COLORS["roads"]).cleaned()
+    return MeshPart(name, vertices, faces, color).cleaned()
 
 
 def _crosses_water_cutout(line_m: LineString, water_union_m: BaseGeometry | None) -> bool:
@@ -1016,6 +1019,44 @@ def build_road_meshes(
     return merge_parts("roads", parts, COLORS["roads"])
 
 
+def build_route_meshes(
+    route_lines_m: list[LineString],
+    scaler: ModelScaler,
+    terrain: TerrainGrid,
+    params: ModelParams,
+    water_union_m: BaseGeometry | None = None,
+) -> MeshPart:
+    parts: list[MeshPart] = []
+    width_mm = params.route_width_mm
+    thickness_mm = params.route_height_mm
+    z_offset_mm = params.route_offset_mm
+    for line_m in route_lines_m:
+        coords_m = list(line_m.coords)
+        if len(coords_m) < 2:
+            continue
+        if _terrain_has_relief(terrain):
+            max_step_m = scaler.length_mm_to_m(_terrain_spacing_mm(terrain) * 1.2)
+            coords_m = _densify_line_coords_m(coords_m, max(max_step_m, 1.0))
+        coords_mm = [scaler.xy_to_mm(float(x), float(y)) for x, y in coords_m]
+        for m0, m1, p0, p1 in zip(coords_m, coords_m[1:], coords_mm, coords_mm[1:]):
+            segment_m = LineString([m0, m1])
+            elevated = params.bridge_clearance_mm if (
+                params.cut_out_water and _crosses_water_cutout(segment_m, water_union_m)
+            ) else 0.0
+            parts.append(_road_segment_part(
+                p0,
+                p1,
+                width_mm,
+                terrain,
+                thickness_mm=thickness_mm,
+                z_offset_mm=z_offset_mm,
+                bridge_offset_mm=elevated,
+                name="route",
+                color=COLORS["route"],
+            ))
+    return merge_parts("route", parts, COLORS["route"])
+
+
 def water_line_width_m(tags: dict[str, str]) -> float:
     waterway = tags.get("waterway", "")
     widths = {"river": 12.0, "canal": 8.0, "stream": 2.5, "ditch": 1.8, "drain": 1.5}
@@ -1062,6 +1103,15 @@ def _feature_polygons(features: list[OSMFeature]) -> list[Polygon]:
         for p in iter_polygons(feature.geometry_m):
             polys.append(p)
     return polys
+
+
+def water_union_geometry_m(
+    water_features: list[OSMFeature],
+    scaler: ModelScaler,
+    params: ModelParams,
+) -> BaseGeometry | None:
+    water_polys = _feature_polygons(water_features) + _buffer_feature_lines(water_features, scaler, params, "water")
+    return unary_union(water_polys) if water_polys else None
 
 
 def water_cutout_polygons_mm(water_features: list[OSMFeature], scaler: ModelScaler, params: ModelParams) -> list[Polygon]:

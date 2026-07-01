@@ -6,7 +6,7 @@ from shapely.ops import unary_union
 
 from city_modeler.dem import TerrainGrid
 from city_modeler.geo import ModelScaler
-from city_modeler.mesh_ops import build_building_meshes, build_road_meshes, build_surface_layer_meshes, extrude_polygon, is_bridge, road_width_m, road_width_mm, terrain_to_mesh
+from city_modeler.mesh_ops import build_building_meshes, build_road_meshes, build_route_meshes, build_surface_layer_meshes, extrude_polygon, is_bridge, road_width_m, road_width_mm, terrain_to_mesh
 from city_modeler.mesh_repair import mesh_diagnostics
 from city_modeler.osm import OSMFeature
 from city_modeler.params import ModelParams
@@ -243,6 +243,32 @@ def test_road_line_densifies_over_terrain_peak():
 
     assert not mesh.is_empty()
     assert float(mesh.vertices[:, 2].max()) > 10.0
+
+
+def test_route_line_follows_terrain_peak():
+    params = ModelParams(
+        south=0.0,
+        west=0.0,
+        north=0.01,
+        east=0.01,
+        include_route=True,
+        route_segments=[[[0.001, 0.001], [0.009, 0.009]]],
+        route_width_mm=0.8,
+        route_height_mm=0.6,
+    )
+    scaler = ModelScaler(scale_mm_per_m=1.0, width_mm=40.0, height_mm=40.0)
+    terrain = TerrainGrid(
+        x_mm=np.asarray([[0.0, 20.0, 40.0], [0.0, 20.0, 40.0], [0.0, 20.0, 40.0]]),
+        y_mm=np.asarray([[0.0, 0.0, 0.0], [20.0, 20.0, 20.0], [40.0, 40.0, 40.0]]),
+        z_mm=np.asarray([[3.0, 3.0, 3.0], [3.0, 12.0, 3.0], [3.0, 3.0, 3.0]]),
+    )
+    route_line = LineString([(2.0, 2.0), (38.0, 38.0)])
+
+    mesh = build_route_meshes([route_line], scaler, terrain, params)
+
+    assert not mesh.is_empty()
+    assert mesh.name == "route"
+    assert float(np.ptp(mesh.vertices[:, 2])) > 4.0
 
 
 def test_concave_surface_extrusion_does_not_fill_outside_notch():

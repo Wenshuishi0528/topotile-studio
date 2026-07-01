@@ -10,10 +10,15 @@
   <style>
     :root { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #1f2933; }
     body { margin: 0; background: #f5f7fb; }
-    header { padding: 16px 22px; background: #111827; color: white; }
+    header { position: relative; padding: 16px 22px; background: #111827; color: white; }
     header h1 { margin: 0 0 4px; font-size: 20px; }
     header p { margin: 0; opacity: 0.78; font-size: 13px; }
     .app-version { font-size: 12px; opacity: 0.62; margin-left: 8px; font-weight: 700; }
+    .header-actions { position: absolute; top: 14px; right: 22px; display: flex; align-items: center; gap: 14px; }
+    .author-name { font-size: 13px; font-weight: 800; opacity: 0.86; }
+    .language-switch { display: inline-flex; align-items: center; gap: 4px; padding: 3px; border: 1px solid rgba(255,255,255,.22); border-radius: 8px; background: rgba(255,255,255,.08); }
+    .language-switch button { width: auto; margin: 0; padding: 4px 8px; border-radius: 6px; background: transparent; color: rgba(255,255,255,.72); font-size: 12px; }
+    .language-switch button.active { background: rgba(255,255,255,.18); color: white; }
     main { display: grid; grid-template-columns: minmax(360px, 430px) 1fr; gap: 16px; padding: 16px; }
     .panel, .viewer { background: white; border: 1px solid #d9e2ec; border-radius: 12px; box-shadow: 0 1px 4px rgba(15,23,42,.05); }
     .panel { padding: 16px; max-height: calc(100vh - 118px); overflow: auto; }
@@ -113,12 +118,19 @@
     .bbox-move-handle.keyboard-active {
       box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.22), 0 1px 5px rgba(15,23,42,.35);
     }
-    @media (max-width: 920px) { main { grid-template-columns: 1fr; } .panel { max-height: none; } .viewer { min-height: 560px; --map-pane-height: 320px; } }
+    @media (max-width: 920px) { main { grid-template-columns: 1fr; } .panel { max-height: none; } .viewer { min-height: 560px; --map-pane-height: 320px; } .header-actions { position: static; margin-top: 8px; justify-content: space-between; } }
   </style>
 </head>
 <body>
 <header>
-  <h1>TopoTile Studio <span class="app-version" id="appVersionLabel">v0.30.0</span></h1>
+  <h1>TopoTile Studio <span class="app-version" id="appVersionLabel">v0.33.0</span></h1>
+  <div class="header-actions">
+    <div class="author-name">Made by Wenshuishi</div>
+    <div class="language-switch" aria-label="Language">
+      <button type="button" data-lang-option="en">EN</button>
+      <button type="button" data-lang-option="zh">中文</button>
+    </div>
+  </div>
   <p>Local web app for generating Bambu A1-friendly 3MF city and terrain tiles.</p>
 </header>
 <main>
@@ -139,6 +151,8 @@
     <input id="output_name" type="text" value="city_model" maxlength="80" placeholder="city_model">
     <input id="project_file" type="file" accept=".json,application/json" hidden>
     <div class="small" id="projectStatus">The generated 3MF, GLB, STL, and chunk ZIP use this name.</div>
+    <button class="secondary" id="sample" type="button">Offline Test Model</button>
+    <div class="small">Built-in sample: generates a test model without internet.</div>
 
     <div class="button-row">
       <button class="secondary" id="useView">Use map view</button>
@@ -237,6 +251,22 @@
     </div>
     <div class="small">Leave small footpaths/service roads off for a cleaner printable street grid.</div>
 
+    <label>Route / Track</label>
+    <div class="checks">
+      <label class="check"><input id="include_route" type="checkbox"> Raised route line</label>
+    </div>
+    <input id="route_file" type="file" accept=".gpx,.kml,application/gpx+xml,application/vnd.google-earth.kml+xml" />
+    <div class="row">
+      <div><label>Route width, mm</label><input id="route_width_mm" type="number" value="1.20" min="0.15" max="20" step="0.05"></div>
+      <div><label>Route height, mm</label><input id="route_height_mm" type="number" value="0.80" min="0.05" max="20" step="0.05"></div>
+      <div><label>Route offset, mm</label><input id="route_offset_mm" type="number" value="0.15" min="0" max="30" step="0.05"></div>
+    </div>
+    <div class="button-row">
+      <button class="secondary" id="fitRoute" type="button">Fit route</button>
+      <button class="secondary" id="clearRoute" type="button">Clear route</button>
+    </div>
+    <div class="small" id="routeStatus">Upload a GPX or KML track to print it as a raised line over the model.</div>
+
     <label>Optional DEM GeoTIFF</label>
     <input id="dem_file" type="file" accept=".tif,.tiff" />
     <div class="small">Uploaded DEM files override automatic terrain.</div>
@@ -263,7 +293,6 @@
     <button class="primary" id="generate">Generate 3MF</button>
     <a class="download-primary disabled" id="download3mf" href="#" download>Download 3MF</a>
     <a class="download-primary alt disabled" id="downloadChunks" href="#" download>Download chunk ZIP</a>
-    <button class="secondary" id="sample">Generate offline sample</button>
 
     <label>Maintenance</label>
     <div class="checks">
@@ -289,8 +318,324 @@
   </section>
 </main>
 <script>
-  const APP_VERSION = '0.30.0';
+  const APP_VERSION = '0.33.0';
   document.getElementById('appVersionLabel').textContent = `v${APP_VERSION}`;
+
+  const LANGUAGE_STORAGE_KEY = 'topotile.language';
+  const ZH_TEXT = {
+    'Local web app for generating Bambu A1-friendly 3MF city and terrain tiles.': '本地网页应用，用于生成适合 Bambu A1 打印的 3MF 城市与地形模型。',
+    'Address search': '地址搜索',
+    'Search': '搜索',
+    'Search moves the current selection center to the result.': '搜索后会把当前选择框中心移动到结果位置。',
+    'Project': '项目',
+    'Save project': '保存项目',
+    'Load project': '加载项目',
+    'File name': '文件名',
+    'The generated 3MF, GLB, STL, and chunk ZIP use this name.': '生成的 3MF、GLB、STL 和分块 ZIP 会使用这个名称。',
+    'Offline Test Model': '离线测试模型',
+    'Built-in sample: generates a test model without internet.': '内置样例：无需联网即可生成测试模型。',
+    'Use map view': '使用当前地图视图',
+    'Fit selection': '适配选择框',
+    'Selection': '选择框',
+    'Free': '自由',
+    'Circle': '圆形',
+    'Hex': '六边形',
+    'Drag the blue rectangle or its corner handles. Start around 0.5–2 km².': '拖拽蓝色选择框或角点。建议从 0.5-2 平方公里左右开始。',
+    'South': '南',
+    'West': '西',
+    'North': '北',
+    'East': '东',
+    'Max XY size, mm': '最大 XY 尺寸，mm',
+    'Base thickness, mm': '底板厚度，mm',
+    'Vertical exaggeration': '垂直夸张倍数',
+    'Terrain grid size': '地形网格尺寸',
+    'Building height multiplier': '建筑高度倍率',
+    'Max building height, mm': '最大建筑高度，mm',
+    'Default building height, m': '默认建筑高度，m',
+    'Min road width, mm': '最小道路宽度，mm',
+    'Footway width, mm': 'Footway 宽度，mm',
+    'Pedestrian width, mm': 'Pedestrian 宽度，mm',
+    'Bridge clearance, mm': '桥梁离地高度，mm',
+    'Terrain': '地形',
+    'Large map mode': '大地图模式',
+    'Auto terrain relief': '自动地形起伏',
+    'Large map mode chunks OSM data for bigger selections. Auto terrain relief controls whether the base is flat or height-varying. Uploaded DEM files override automatic terrain.': '大地图模式会把 OSM 数据分块下载。自动地形起伏决定底板是平面还是有高度变化。上传 DEM 文件会覆盖自动地形。',
+    'Max terrain height, mm': '最大地形高度，mm',
+    'Terrain tile zoom': '地形瓦片缩放级别',
+    'OSM tile size, km': 'OSM 分块大小，km',
+    'Flat base: terrain relief controls are ignored unless Auto terrain relief is on or a DEM is uploaded.': '平面底板：除非开启自动地形起伏或上传 DEM，否则地形起伏参数会被忽略。',
+    'Layers': '图层',
+    'Buildings': '建筑',
+    'Roads': '道路',
+    'Water': '水体',
+    'Cut out water': '水体镂空',
+    'Green': '绿地',
+    'Parking': '停车场',
+    'Airport': '机场',
+    'Area infill': '区域补面',
+    'Area infill height, mm': '区域补面高度，mm',
+    'Area infill mode': '区域补面模式',
+    'No-building areas': '无建筑区域',
+    'All area polygons': '全部区域面',
+    'Airport includes runways, taxiways, and aprons as a low layer with parking-lot thickness.': '机场包含跑道、滑行道和停机坪，会按停车场类似的低矮图层生成。',
+    'Cut out water removes lakes and ocean from the base so you can place colored material underneath.': '水体镂空会从底板中移除湖泊和海洋，便于在下方放置彩色材料。',
+    'Road cleanup strength': '道路清理强度',
+    'Balanced: keeps normal streets plus pedestrian/footway.': '平衡：保留普通街道以及 pedestrian/footway。',
+    'Road Levels': '道路级别',
+    'Motorway': '高速',
+    'Trunk': '干线',
+    'Primary': '一级道路',
+    'Secondary': '二级道路',
+    'Tertiary': '三级道路',
+    'Unclassified': '未分类道路',
+    'Residential': '住宅道路',
+    'Living street': '生活街道',
+    'Service': '服务道路',
+    'Pedestrian': '步行街',
+    'Cycleway': '自行车道',
+    'Footway': '步道',
+    'Path': '小径',
+    'Track': '土路/轨迹路',
+    'Steps': '台阶',
+    'Leave small footpaths/service roads off for a cleaner printable street grid.': '关闭较小的步道/服务道路，可以得到更干净、更适合打印的街道网格。',
+    'Route / Track': '路线 / 轨迹',
+    'Raised route line': '凸起路线',
+    'Route width, mm': '路线宽度，mm',
+    'Route height, mm': '路线高度，mm',
+    'Route offset, mm': '路线离地偏移，mm',
+    'Fit route': '适配路线',
+    'Clear route': '清除路线',
+    'Upload a GPX or KML track to print it as a raised line over the model.': '上传 GPX 或 KML 轨迹，将其作为模型上的凸起线路打印。',
+    'Optional DEM GeoTIFF': '可选 DEM GeoTIFF',
+    'Uploaded DEM files override automatic terrain.': '上传 DEM 文件会覆盖自动地形。',
+    'DEM attribution': 'DEM 署名',
+    'Chunk export': '分块导出',
+    'Export numbered chunks': '导出带编号的分块',
+    'Chunk rows': '分块行数',
+    'Chunk columns': '分块列数',
+    'Numbering starts at the southwest corner: r01_c01, then east by column and north by row.': '编号从西南角开始：r01_c01，然后按列向东、按行向北。',
+    'Mesh repair': '网格修复',
+    'Auto repair non-manifold edges': '自动修复非流形边',
+    'Runs before 3MF/GLB/STL export. It removes common degenerate/duplicate geometry and reports any remaining mesh issues.': '在导出 3MF/GLB/STL 前运行。会移除常见退化/重复几何，并报告剩余网格问题。',
+    'Generate 3MF': '生成 3MF',
+    'Download 3MF': '下载 3MF',
+    'Download chunk ZIP': '下载分块 ZIP',
+    'Maintenance': '维护',
+    'Include OSM cache': '包含 OSM 缓存',
+    'Include elevation cache': '包含高程缓存',
+    'Include terrain cache': '包含地形缓存',
+    'Clear cache': '清理缓存',
+    'Cache status not loaded.': '缓存状态未加载。',
+    'Idle.': '空闲。',
+    'Auto rotate': '自动旋转',
+    'Detailed: keeps service roads, paths, cycleways, tracks, and steps.': '详细：保留服务道路、小径、自行车道、土路和台阶。',
+    'Clean: removes minor pedestrian/service detail.': '清爽：移除较小的步行/服务道路细节。',
+    'Major roads: keeps only the main network.': '主干：只保留主要道路网络。',
+    'Search address or place': '搜索地址或地点',
+    'Example: Elevation data from USGS 3DEP, public domain.': '示例：高程数据来自 USGS 3DEP，公共领域。',
+    'Language': '语言',
+    'Resize map and preview panes': '调整地图和预览窗口大小',
+    '3D preview will appear after generation': '生成后会显示 3D 预览',
+    'Drag to resize selection': '拖拽调整选择框大小',
+    'Drag to move selection': '拖拽移动选择框',
+    'Selection ({mode}): {width} m × {height} m, {area} km².': '选择框（{mode}）：{width} m × {height} m，{area} km²。',
+    ' This is large for public OSM queries; shrink it if generation fails.': ' 这个范围对公共 OSM 查询偏大；如果生成失败，请缩小范围。',
+    ' Drag the rectangle or its handles to edit.': ' 可拖拽矩形或控制点进行编辑。',
+    'Enter an address or place name.': '请输入地址或地点名称。',
+    'Searching...': '搜索中...',
+    'Address search failed': '地址搜索失败',
+    'Moved selection to: {name}': '已移动选择框到：{name}',
+    'Search failed: {message}': '搜索失败：{message}',
+    'Route file is not valid XML.': '路线文件不是有效的 XML。',
+    'No GPX/KML route points found.': '没有找到 GPX/KML 路线点。',
+    '{name}{segments} segment(s), {points} points.': '{name}{segments} 段，{points} 个点。',
+    'Loading route...': '正在加载路线...',
+    'Route load failed: {message}': '路线加载失败：{message}',
+    'Load a GPX or KML route first.': '请先加载 GPX 或 KML 路线。',
+    'Project configuration saved.': '项目配置已保存。',
+    'Loaded project: {name}': '已加载项目：{name}',
+    'Load failed: {message}': '加载失败：{message}',
+    'Terrain mode: uploaded DEM controls relief. Auto terrain and terrain tile zoom are ignored.': '地形模式：上传的 DEM 控制地形起伏，自动地形和地形瓦片缩放会被忽略。',
+    'Terrain mode: large-map terrain tiles plus tiled OSM fetch.': '地形模式：使用大地图地形瓦片和分块 OSM 下载。',
+    'Terrain mode: automatic elevation sampling for smaller selections.': '地形模式：对较小选择框使用自动高程采样。',
+    'Flat large-map mode: tiled OSM fetch, flat base, no terrain height relief.': '平面大地图模式：分块下载 OSM，底板为平面，无地形起伏。',
+    '{status}: {message}': '{status}：{message}',
+    'Area: {width} m × {height} m': '范围：{width} m × {height} m',
+    'Model: {width} mm × {height} mm': '模型：{width} mm × {height} mm',
+    'File name: {name}': '文件名：{name}',
+    'Terrain: {source}, relief {relief} mm': '地形：{source}，起伏 {relief} mm',
+    'Water cutout: on ({count} polygons)': '水体镂空：开启（{count} 个多边形）',
+    'Selection shape: {shape}': '选择形状：{shape}',
+    'Area infill mode: {mode}': '区域补面模式：{mode}',
+    'Route: {points} points, {segments} clipped segment(s), {width} mm × {height} mm': '路线：{points} 个点，{segments} 段裁剪线，{width} mm × {height} mm',
+    'OSM tiles: {count}': 'OSM 分块：{count}',
+    'Features: {features}': '要素：{features}',
+    'Road levels: {levels}': '道路级别：{levels}',
+    'none': '无',
+    'Chunks: {rows} × {cols} ({pieces} files)': '分块：{rows} × {cols}（{pieces} 个文件）',
+    'Printability: {score}/100 {grade}': '可打印性：{score}/100 {grade}',
+    'Mesh repair: {status}, non-manifold edges {before} → {after}': '网格修复：{status}，非流形边 {before} → {after}',
+    'Mesh repair: disabled': '网格修复：已关闭',
+    '3MF triangles: {count}': '3MF 三角面数：{count}',
+    'No API key or registration is required for normal Overpass use. Try dragging the selection box smaller, or retry later if the public server is busy.': '正常使用 Overpass 不需要 API key 或注册。请尝试缩小选择框；如果公共服务器繁忙，稍后再试。',
+    'Auto terrain uses a public elevation service and does not require registration. Turn it off or upload a DEM GeoTIFF if the service is busy.': '自动地形使用公共高程服务，不需要注册。如果服务繁忙，请关闭它或上传 DEM GeoTIFF。',
+    'Download GLB': '下载 GLB',
+    'Download STL': '下载 STL',
+    'Attribution': '署名',
+    'Project JSON': '项目 JSON',
+    'Chunk manifest': '分块清单',
+    'Summary': '摘要',
+    'Error log': '错误日志',
+    'Submitting job...': '正在提交任务...',
+    'Job submission failed': '任务提交失败',
+    'Failed to submit: {message}': '提交失败：{message}',
+    'Submitting sample job...': '正在提交样例任务...',
+    'Sample submission failed': '样例任务提交失败',
+    'Failed to submit sample: {message}': '提交样例失败：{message}',
+    'Generated files: {generated}. OSM cache: {osm}. Elevation cache: {elevation}. Terrain cache: {terrain}.': '生成文件：{generated}。OSM 缓存：{osm}。高程缓存：{elevation}。地形缓存：{terrain}。',
+    'Cache status failed': '缓存状态读取失败',
+    'Cache status failed: {message}': '缓存状态读取失败：{message}',
+    'Clearing cache...': '正在清理缓存...',
+    'Cache clear failed': '缓存清理失败',
+    'Cleared {cleared}: {removed} removed. Generated files now {generated}, OSM cache {osm}, elevation cache {elevation}, terrain cache {terrain}.': '已清理 {cleared}：移除 {removed}。当前生成文件 {generated}，OSM 缓存 {osm}，高程缓存 {elevation}，地形缓存 {terrain}。',
+    'nothing': '无内容',
+    'Clear failed: {message}': '清理失败：{message}',
+    'Queued': '已排队',
+    'Complete': '完成',
+    'Done': '完成',
+    'Preparing built-in offline test model': '正在准备内置离线测试模型',
+    'Generating synthetic sample': '正在生成合成样例',
+    'Projecting selected area': '正在投影选择区域',
+    'Creating flat terrain': '正在创建平面地形',
+    'Downloading terrain elevation': '正在下载地形高程',
+    'Downloading terrain tiles': '正在下载地形瓦片',
+    'Loading uploaded DEM terrain': '正在加载上传的 DEM 地形',
+    'Loading OpenStreetMap data': '正在加载 OpenStreetMap 数据',
+    'Parsing OSM features': '正在解析 OSM 要素',
+    'Repairing mesh geometry': '正在修复网格几何',
+    'Writing 3MF and GLB files': '正在写入 3MF 和 GLB 文件',
+    'Model is very close to the Bambu A1 build-plate limit.': '模型非常接近 Bambu A1 打印平台尺寸上限。',
+    'Reduce Max XY size or enable chunk export.': '请减小最大 XY 尺寸，或开启分块导出。',
+    'Model leaves little edge margin on the build plate.': '模型在打印平台边缘留下的余量较小。',
+    'Use a slightly smaller Max XY size.': '请使用稍小一点的最大 XY 尺寸。',
+    'Base is thin for a terrain/city tile.': '对于城市/地形模型来说，底板偏薄。',
+    'Use at least 1.2 mm base thickness; 2-3 mm is safer.': '建议底板厚度至少 1.2 mm；2-3 mm 更稳妥。',
+    'Base may flex after printing.': '打印后底板可能会弯曲。',
+    'Use a thicker base for larger tiles.': '较大的模型建议使用更厚的底板。',
+    'Some road geometry may be too narrow to print clearly.': '部分道路几何可能太窄，打印不清楚。',
+    'Raise Min road width to 0.5 mm or higher.': '请把最小道路宽度提高到 0.5 mm 或更高。',
+    'Footways are set very thin.': 'Footway 设置得很细。',
+    'Raise Footway width if the printer misses small paths.': '如果打印时小路丢失，请提高 Footway 宽度。',
+    'Pedestrian roads are set very thin.': 'Pedestrian 道路设置得很细。',
+    'Raise Pedestrian width if plazas or paths disappear.': '如果广场或步行道路消失，请提高 Pedestrian 宽度。',
+    'Terrain relief is high for a small desktop print.': '对于桌面小模型来说，地形起伏偏高。',
+    'Lower vertical exaggeration or max terrain height.': '请降低垂直夸张倍数或最大地形高度。',
+    'Terrain relief is fairly strong.': '地形起伏较强。',
+    'Check the side profile before printing.': '打印前请检查侧面轮廓。',
+    '3MF mesh is very dense and may load slowly in slicers.': '3MF 网格很密，切片软件加载可能较慢。',
+    'Lower terrain grid size or road detail.': '请降低地形网格尺寸或道路细节。',
+    '3MF mesh is moderately dense.': '3MF 网格密度中等偏高。',
+    'If Bambu Studio feels slow, lower terrain grid size.': '如果 Bambu Studio 很卡，请降低地形网格尺寸。',
+    'Mesh repair found remaining non-manifold edges.': '网格修复后仍发现非流形边。',
+    'Try reducing terrain/grid detail or road detail if Bambu Studio still reports repair issues.': '如果 Bambu Studio 仍提示修复问题，请尝试降低地形/网格细节或道路细节。',
+    'Automatic mesh repair fixed non-manifold edges before export.': '自动网格修复已在导出前修复非流形边。',
+    'Open the 3MF in Bambu Studio to confirm no additional repair prompt appears.': '请在 Bambu Studio 中打开 3MF，确认没有额外修复提示。',
+    'Automatic mesh repair is disabled.': '自动网格修复已关闭。',
+    'Enable mesh repair if Bambu Studio reports non-manifold edges.': '如果 Bambu Studio 提示非流形边，请开启网格修复。',
+    'No buildings were found in this selection.': '当前选择范围内没有找到建筑。',
+    'Move or enlarge the selection if buildings are expected.': '如果这里应该有建筑，请移动或扩大选择范围。',
+    'No selected roads were generated.': '没有生成已选择的道路。',
+    'Enable more road levels or move the selection.': '请开启更多道路级别，或移动选择范围。',
+    'Use the numbered ZIP files for printing and stitching.': '请使用 ZIP 中带编号的文件进行打印和拼接。',
+    'warning': '警告',
+    'error': '错误',
+    'info': '信息',
+    'flat': '平面',
+    'auto': '自动',
+    'uploaded_dem': '上传 DEM',
+    'rectangle': '矩形',
+    'circle': '圆形',
+    'hexagon': '六边形',
+    'empty_areas': '无建筑区域',
+    'all_area_polygons': '全部区域面',
+    'fixed': '已修复',
+    'remaining_issues': '仍有问题',
+    'disabled': '已关闭',
+    'jobs': '任务文件',
+    'outputs': '输出文件',
+    'osm': 'OSM 缓存',
+    'elevation': '高程缓存',
+    'terrain': '地形缓存',
+  };
+
+  const STATUS_ZH = {
+    queued: '排队中',
+    running: '运行中',
+    complete: '完成',
+    failed: '失败',
+  };
+
+  function preferredLanguage() {
+    const saved = localStorage.getItem(LANGUAGE_STORAGE_KEY);
+    if (saved === 'en' || saved === 'zh') return saved;
+    return (navigator.language || '').toLowerCase().startsWith('zh') ? 'zh' : 'en';
+  }
+
+  let currentLanguage = preferredLanguage();
+
+  function tr(source, vars = {}) {
+    const template = currentLanguage === 'zh' ? (ZH_TEXT[source] || source) : source;
+    return template.replace(/\{(\w+)\}/g, (_, key) => Object.prototype.hasOwnProperty.call(vars, key) ? String(vars[key]) : `{${key}}`);
+  }
+
+  function trStatus(status) {
+    return currentLanguage === 'zh' ? (STATUS_ZH[status] || status) : status;
+  }
+
+  function translateTextNodes(root = document.body) {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode(node) {
+        const parent = node.parentElement;
+        if (!parent || ['SCRIPT', 'STYLE'].includes(parent.tagName)) return NodeFilter.FILTER_REJECT;
+        return node.nodeValue.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+      }
+    });
+    const nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    nodes.forEach(node => {
+      if (!node._i18nSource) node._i18nSource = node.nodeValue.trim();
+      const leading = node.nodeValue.match(/^\s*/)[0];
+      const trailing = node.nodeValue.match(/\s*$/)[0];
+      node.nodeValue = `${leading}${tr(node._i18nSource)}${trailing}`;
+    });
+  }
+
+  function translateAttributes(root = document.body) {
+    root.querySelectorAll('[placeholder], [aria-label], [title], [alt]').forEach(el => {
+      ['placeholder', 'aria-label', 'title', 'alt'].forEach(attr => {
+        if (!el.hasAttribute(attr)) return;
+        const key = `_i18n_${attr}`;
+        if (!el[key]) el[key] = el.getAttribute(attr);
+        el.setAttribute(attr, tr(el[key]));
+      });
+    });
+  }
+
+  function setLanguage(lang, persist = true) {
+    currentLanguage = lang === 'zh' ? 'zh' : 'en';
+    if (persist) localStorage.setItem(LANGUAGE_STORAGE_KEY, currentLanguage);
+    document.documentElement.lang = currentLanguage === 'zh' ? 'zh-CN' : 'en';
+    document.querySelectorAll('[data-lang-option]').forEach(button => {
+      button.classList.toggle('active', button.dataset.langOption === currentLanguage);
+    });
+    translateTextNodes();
+    translateAttributes();
+    if (typeof updateBBoxInfo === 'function') updateBBoxInfo(normalizeBBox(readBBox()));
+    if (typeof updateRoadCleaningStatus === 'function') updateRoadCleaningStatus();
+    if (typeof updateTerrainModeStatus === 'function') updateTerrainModeStatus();
+    if (typeof updateRouteStatus === 'function') updateRouteStatus();
+    if (typeof refreshCacheStatus === 'function') refreshCacheStatus();
+  }
 
   const map = L.map('map').setView([47.623, -122.350], 15);
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -303,6 +648,9 @@
   let moveStart = null;
   let moveStartBounds = null;
   let selectionKeyboardActive = false;
+  let routeSegments = [];
+  let routeLayer = null;
+  let routeFileName = '';
   const cornerIcon = L.divIcon({className: 'bbox-handle', iconSize: [14, 14]});
   const moveIcon = L.divIcon({className: 'bbox-move-handle', iconSize: [18, 18]});
 
@@ -368,6 +716,18 @@
   function selectionShape() {
     const mode = selectionMode();
     return mode === 'circle' || mode === 'hexagon' ? mode : 'rectangle';
+  }
+
+  function selectionModeLabel(mode = selectionMode()) {
+    const labels = {
+      free: 'Free',
+      '1x1': '1:1',
+      '5x7': '5:7',
+      '7x5': '7:5',
+      circle: 'Circle',
+      hexagon: 'Hex',
+    };
+    return tr(labels[mode] || mode);
   }
 
   function aspectForMode(mode = selectionMode()) {
@@ -504,9 +864,15 @@
 
   function updateBBoxInfo(box) {
     const info = estimateBBox(box);
-    const modeLabel = selectionMode().replace('1x1', '1:1').replace('5x7', '5:7').replace('7x5', '7:5');
-    const message = `Selection (${modeLabel}): ${info.widthM.toFixed(0)} m × ${info.heightM.toFixed(0)} m, ${info.areaKm2.toFixed(2)} km².`;
-    const hint = info.areaKm2 > 2 ? ' This is large for public OSM queries; shrink it if generation fails.' : ' Drag the rectangle or its handles to edit.';
+    const message = tr('Selection ({mode}): {width} m × {height} m, {area} km².', {
+      mode: selectionModeLabel(),
+      width: info.widthM.toFixed(0),
+      height: info.heightM.toFixed(0),
+      area: info.areaKm2.toFixed(2),
+    });
+    const hint = info.areaKm2 > 2
+      ? tr(' This is large for public OSM queries; shrink it if generation fails.')
+      : tr(' Drag the rectangle or its handles to edit.');
     document.getElementById('bboxInfo').textContent = message + hint;
   }
 
@@ -714,18 +1080,18 @@
     const statusEl = document.getElementById('addressSearchStatus');
     const query = input.value.trim();
     if (!query) {
-      statusEl.textContent = 'Enter an address or place name.';
+      statusEl.textContent = tr('Enter an address or place name.');
       return;
     }
-    statusEl.textContent = 'Searching...';
+    statusEl.textContent = tr('Searching...');
     try {
       const res = await fetch(`/api/geocode?q=${encodeURIComponent(query)}`);
       const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'Address search failed');
+      if (!res.ok) throw new Error(data.detail || tr('Address search failed'));
       moveSelectionTo(data.lat, data.lon);
-      statusEl.textContent = `Moved selection to: ${data.display_name}`;
+      statusEl.textContent = tr('Moved selection to: {name}', {name: data.display_name});
     } catch (err) {
-      statusEl.textContent = `Search failed: ${err.message}`;
+      statusEl.textContent = tr('Search failed: {message}', {message: err.message});
     }
   }
 
@@ -736,6 +1102,193 @@
       searchAddress();
     }
   });
+
+  function routePointCount() {
+    return routeSegments.reduce((total, segment) => total + segment.length, 0);
+  }
+
+  function normalizeRouteSegments(segments) {
+    if (!Array.isArray(segments)) return [];
+    const normalized = [];
+    segments.forEach(rawSegment => {
+      if (!Array.isArray(rawSegment)) return;
+      const segment = [];
+      let previous = null;
+      rawSegment.forEach(rawPoint => {
+        if (!Array.isArray(rawPoint) || rawPoint.length < 2) return;
+        const lat = parseFloat(rawPoint[0]);
+        const lng = parseFloat(rawPoint[1]);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+        if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return;
+        const key = `${lat.toFixed(6)},${lng.toFixed(6)}`;
+        if (key === previous) return;
+        previous = key;
+        segment.push([lat, lng]);
+      });
+      if (segment.length >= 2) normalized.push(segment);
+    });
+    return normalized;
+  }
+
+  function xmlLocalName(node) {
+    return (node.localName || node.nodeName || '').toLowerCase();
+  }
+
+  function childElementsByName(node, name) {
+    return Array.from(node.children || []).filter(child => xmlLocalName(child) === name);
+  }
+
+  function parseGpxRoute(root) {
+    const segments = [];
+    Array.from(root.getElementsByTagNameNS('*', 'trkseg')).forEach(trkseg => {
+      const segment = childElementsByName(trkseg, 'trkpt').map(point => [
+        parseFloat(point.getAttribute('lat')),
+        parseFloat(point.getAttribute('lon')),
+      ]);
+      if (segment.length >= 2) segments.push(segment);
+    });
+    Array.from(root.getElementsByTagNameNS('*', 'rte')).forEach(route => {
+      const segment = childElementsByName(route, 'rtept').map(point => [
+        parseFloat(point.getAttribute('lat')),
+        parseFloat(point.getAttribute('lon')),
+      ]);
+      if (segment.length >= 2) segments.push(segment);
+    });
+    if (!segments.length) {
+      const allTrackPoints = Array.from(root.getElementsByTagNameNS('*', 'trkpt')).map(point => [
+        parseFloat(point.getAttribute('lat')),
+        parseFloat(point.getAttribute('lon')),
+      ]);
+      if (allTrackPoints.length >= 2) segments.push(allTrackPoints);
+    }
+    return normalizeRouteSegments(segments);
+  }
+
+  function parseKmlCoordinateText(text) {
+    if (!text) return [];
+    return text.replace(/\s+/g, ' ').trim().split(' ').map(token => {
+      const fields = token.split(',');
+      return [parseFloat(fields[1]), parseFloat(fields[0])];
+    });
+  }
+
+  function parseKmlRoute(root) {
+    const segments = [];
+    Array.from(root.getElementsByTagNameNS('*', 'coordinates')).forEach(node => {
+      const segment = parseKmlCoordinateText(node.textContent || '');
+      if (segment.length >= 2) segments.push(segment);
+    });
+    return normalizeRouteSegments(segments);
+  }
+
+  function parseRouteText(text, filename = '') {
+    const doc = new DOMParser().parseFromString(text, 'application/xml');
+    const parserError = doc.getElementsByTagName('parsererror')[0];
+    if (parserError) throw new Error(tr('Route file is not valid XML.'));
+    const root = doc.documentElement;
+    const suffix = filename.toLowerCase().split('.').pop();
+    const rootName = xmlLocalName(root);
+    const segments = suffix === 'kml' || rootName === 'kml' ? parseKmlRoute(root) : parseGpxRoute(root);
+    if (!segments.length) throw new Error(tr('No GPX/KML route points found.'));
+    return segments;
+  }
+
+  function updateRouteLayer() {
+    if (routeLayer) {
+      map.removeLayer(routeLayer);
+      routeLayer = null;
+    }
+    if (!routeSegments.length) return;
+    routeLayer = L.featureGroup(routeSegments.map(segment => L.polyline(segment, {
+      color: '#dc3a30',
+      weight: 4,
+      opacity: 0.9,
+      lineJoin: 'round',
+      lineCap: 'round',
+    }))).addTo(map);
+  }
+
+  function updateRouteStatus(message = '') {
+    const status = document.getElementById('routeStatus');
+    if (message) {
+      status.textContent = message;
+      return;
+    }
+    if (!routeSegments.length) {
+      status.textContent = tr('Upload a GPX or KML track to print it as a raised line over the model.');
+      return;
+    }
+    const name = routeFileName ? `${routeFileName}: ` : '';
+    status.textContent = tr('{name}{segments} segment(s), {points} points.', {
+      name,
+      segments: routeSegments.length,
+      points: routePointCount(),
+    });
+  }
+
+  function setRouteSegments(segments, filename = '') {
+    routeSegments = normalizeRouteSegments(segments);
+    routeFileName = filename || '';
+    document.getElementById('include_route').checked = routeSegments.length > 0;
+    updateRouteLayer();
+    updateRouteStatus();
+  }
+
+  async function loadRouteFile(file) {
+    const status = document.getElementById('routeStatus');
+    status.textContent = tr('Loading route...');
+    try {
+      const segments = parseRouteText(await file.text(), file.name);
+      setRouteSegments(segments, file.name);
+      if (routeLayer) map.fitBounds(routeLayer.getBounds(), {padding: [24, 24]});
+    } catch (err) {
+      routeSegments = [];
+      routeFileName = '';
+      updateRouteLayer();
+      document.getElementById('include_route').checked = false;
+      status.textContent = tr('Route load failed: {message}', {message: err.message});
+    }
+  }
+
+  function fitSelectionToRoute() {
+    if (!routeLayer) {
+      updateRouteStatus(tr('Load a GPX or KML route first.'));
+      return;
+    }
+    const bounds = routeLayer.getBounds();
+    if (!bounds.isValid()) return;
+    const south = bounds.getSouth();
+    const north = bounds.getNorth();
+    const west = bounds.getWest();
+    const east = bounds.getEast();
+    const latPad = Math.max((north - south) * 0.12, 0.0005);
+    const lngPad = Math.max((east - west) * 0.12, 0.0005);
+    const padded = normalizeBBox({
+      south: south - latPad,
+      north: north + latPad,
+      west: west - lngPad,
+      east: east + lngPad,
+    });
+    writeBBox(constrainBoxAroundCenter(padded, aspectForMode()));
+    drawRect();
+    map.fitBounds(currentSelectionBounds(), {padding: [24, 24]});
+  }
+
+  function clearRoute() {
+    routeSegments = [];
+    routeFileName = '';
+    document.getElementById('route_file').value = '';
+    document.getElementById('include_route').checked = false;
+    updateRouteLayer();
+    updateRouteStatus();
+  }
+
+  document.getElementById('route_file').addEventListener('change', event => {
+    const file = event.target.files[0];
+    if (file) loadRouteFile(file);
+  });
+  document.getElementById('fitRoute').addEventListener('click', fitSelectionToRoute);
+  document.getElementById('clearRoute').addEventListener('click', clearRoute);
 
   const preview = document.getElementById('preview');
   const previewAutoRotate = document.getElementById('preview_auto_rotate');
@@ -817,7 +1370,7 @@
   function updateRoadCleaningStatus() {
     const level = parseInt(document.getElementById('road_cleaning_level').value, 10);
     const preset = ROAD_CLEANING_PRESETS[level] || ROAD_CLEANING_PRESETS[1];
-    document.getElementById('roadCleaningStatus').textContent = preset.label;
+    document.getElementById('roadCleaningStatus').textContent = tr(preset.label);
   }
 
   function applyRoadCleaning() {
@@ -853,16 +1406,16 @@
       params: params(),
     };
     downloadJson(`${name || 'topotile'}_project.json`, payload);
-    document.getElementById('projectStatus').textContent = 'Project configuration saved.';
+    document.getElementById('projectStatus').textContent = tr('Project configuration saved.');
   }
 
   function applyProjectParams(saved) {
     const p = saved.params || saved;
-    const numericIds = ['south','west','north','east','max_size_mm','base_thickness_mm','vertical_exaggeration','terrain_grid_size','building_height_multiplier','max_building_height_mm','default_building_height_m','min_road_width_mm','footway_width_mm','pedestrian_width_mm','bridge_clearance_mm','area_infill_height_mm','max_terrain_height_mm','terrain_tile_zoom','osm_tile_size_km','road_cleaning_level','chunk_rows','chunk_cols'];
+    const numericIds = ['south','west','north','east','max_size_mm','base_thickness_mm','vertical_exaggeration','terrain_grid_size','building_height_multiplier','max_building_height_mm','default_building_height_m','min_road_width_mm','footway_width_mm','pedestrian_width_mm','bridge_clearance_mm','area_infill_height_mm','route_width_mm','route_height_mm','route_offset_mm','max_terrain_height_mm','terrain_tile_zoom','osm_tile_size_km','road_cleaning_level','chunk_rows','chunk_cols'];
     numericIds.forEach(id => {
       if (p[id] !== undefined && document.getElementById(id)) document.getElementById(id).value = p[id];
     });
-    const boolIds = ['large_map_mode','auto_terrain','include_buildings','include_roads','include_water','cut_out_water','include_green','include_parking','include_airport','include_area_infill','chunk_export','auto_repair_mesh'];
+    const boolIds = ['large_map_mode','auto_terrain','include_buildings','include_roads','include_water','cut_out_water','include_green','include_parking','include_airport','include_area_infill','include_route','chunk_export','auto_repair_mesh'];
     boolIds.forEach(id => {
       if (p[id] !== undefined && document.getElementById(id)) document.getElementById(id).checked = Boolean(p[id]);
     });
@@ -876,6 +1429,11 @@
     }
     if (p.output_name !== undefined) document.getElementById('output_name').value = p.output_name;
     if (p.dem_attribution !== undefined) document.getElementById('dem_attribution').value = p.dem_attribution;
+    routeSegments = normalizeRouteSegments(p.route_segments || []);
+    routeFileName = p.route_name || '';
+    updateRouteLayer();
+    updateRouteStatus();
+    if (p.include_route === undefined && routeSegments.length) document.getElementById('include_route').checked = true;
     let mode = saved.selection_mode;
     if (!mode && p.selection_shape === 'circle') mode = 'circle';
     if (!mode && p.selection_shape === 'hexagon') mode = 'hexagon';
@@ -894,9 +1452,9 @@
     try {
       const data = JSON.parse(await file.text());
       applyProjectParams(data);
-      statusEl.textContent = `Loaded project: ${file.name}`;
+      statusEl.textContent = tr('Loaded project: {name}', {name: file.name});
     } catch (err) {
-      statusEl.textContent = `Load failed: ${err.message}`;
+      statusEl.textContent = tr('Load failed: {message}', {message: err.message});
     }
   }
 
@@ -928,21 +1486,21 @@
     document.getElementById('terrain_tile_zoom').disabled = !(auto && large && !hasDem);
     document.getElementById('osm_tile_size_km').disabled = !large;
     if (hasDem) {
-      status.textContent = 'Terrain mode: uploaded DEM controls relief. Auto terrain and terrain tile zoom are ignored.';
+      status.textContent = tr('Terrain mode: uploaded DEM controls relief. Auto terrain and terrain tile zoom are ignored.');
     } else if (auto && large) {
-      status.textContent = 'Terrain mode: large-map terrain tiles plus tiled OSM fetch.';
+      status.textContent = tr('Terrain mode: large-map terrain tiles plus tiled OSM fetch.');
     } else if (auto) {
-      status.textContent = 'Terrain mode: automatic elevation sampling for smaller selections.';
+      status.textContent = tr('Terrain mode: automatic elevation sampling for smaller selections.');
     } else if (large) {
-      status.textContent = 'Flat large-map mode: tiled OSM fetch, flat base, no terrain height relief.';
+      status.textContent = tr('Flat large-map mode: tiled OSM fetch, flat base, no terrain height relief.');
     } else {
-      status.textContent = 'Flat base: terrain relief controls are ignored unless Auto terrain relief is on or a DEM is uploaded.';
+      status.textContent = tr('Flat base: terrain relief controls are ignored unless Auto terrain relief is on or a DEM is uploaded.');
     }
   }
   updateTerrainModeStatus();
 
   function params() {
-    const ids = ['south','west','north','east','max_size_mm','base_thickness_mm','vertical_exaggeration','terrain_grid_size','building_height_multiplier','max_building_height_mm','default_building_height_m','min_road_width_mm','footway_width_mm','pedestrian_width_mm','bridge_clearance_mm','area_infill_height_mm','max_terrain_height_mm','terrain_tile_zoom','osm_tile_size_km','road_cleaning_level','chunk_rows','chunk_cols'];
+    const ids = ['south','west','north','east','max_size_mm','base_thickness_mm','vertical_exaggeration','terrain_grid_size','building_height_multiplier','max_building_height_mm','default_building_height_m','min_road_width_mm','footway_width_mm','pedestrian_width_mm','bridge_clearance_mm','area_infill_height_mm','route_width_mm','route_height_mm','route_offset_mm','max_terrain_height_mm','terrain_tile_zoom','osm_tile_size_km','road_cleaning_level','chunk_rows','chunk_cols'];
     const p = {};
     ids.forEach(id => p[id] = parseFloat(document.getElementById(id).value));
     p.large_map_mode = document.getElementById('large_map_mode').checked;
@@ -959,10 +1517,13 @@
     p.include_parking = document.getElementById('include_parking').checked;
     p.include_airport = document.getElementById('include_airport').checked;
     p.include_area_infill = document.getElementById('include_area_infill').checked;
+    p.include_route = document.getElementById('include_route').checked;
     p.area_infill_mode = document.getElementById('area_infill_mode').value;
     p.dem_attribution = document.getElementById('dem_attribution').value;
     p.output_name = document.getElementById('output_name').value.trim() || 'city_model';
     p.project_name = p.output_name;
+    p.route_name = routeFileName;
+    p.route_segments = routeSegments;
     return p;
   }
 
@@ -977,37 +1538,41 @@
       const data = await res.json();
       progress.value = data.progress || 0;
       statusEl.classList.toggle('failed', data.status === 'failed');
-      statusEl.textContent = `${data.status}: ${data.message || ''}`;
+      statusEl.textContent = tr('{status}: {message}', {
+        status: trStatus(data.status),
+        message: tr(data.message || ''),
+      });
       if (data.summary) {
         const s = data.summary;
-        statusEl.textContent += `\n\nArea: ${s.area_width_m.toFixed(1)} m × ${s.area_height_m.toFixed(1)} m`;
-        statusEl.textContent += `\nModel: ${s.model_width_mm.toFixed(1)} mm × ${s.model_height_mm.toFixed(1)} mm`;
-        if (s.output_name) statusEl.textContent += `\nFile name: ${s.output_name}`;
-        if (s.terrain) statusEl.textContent += `\nTerrain: ${s.terrain.source}, relief ${s.terrain.relief_mm.toFixed(1)} mm`;
-        if (s.water_cutout && s.water_cutout.enabled) statusEl.textContent += `\nWater cutout: on (${s.water_cutout.polygons} polygons)`;
-        if (s.selection_shape) statusEl.textContent += `\nSelection shape: ${s.selection_shape}`;
-        if (s.area_infill_mode) statusEl.textContent += `\nArea infill mode: ${s.area_infill_mode}`;
-        if (s.osm_tile_count) statusEl.textContent += `\nOSM tiles: ${s.osm_tile_count}`;
-        statusEl.textContent += `\nFeatures: ${JSON.stringify(s.features)}`;
-        if (s.selected_road_levels) statusEl.textContent += `\nRoad levels: ${s.selected_road_levels.join(', ') || 'none'}`;
-        if (s.chunk_export && s.chunk_export.enabled) statusEl.textContent += `\nChunks: ${s.chunk_export.rows} × ${s.chunk_export.cols} (${s.chunk_export.pieces} files)`;
+        statusEl.textContent += `\n\n${tr('Area: {width} m × {height} m', {width: s.area_width_m.toFixed(1), height: s.area_height_m.toFixed(1)})}`;
+        statusEl.textContent += `\n${tr('Model: {width} mm × {height} mm', {width: s.model_width_mm.toFixed(1), height: s.model_height_mm.toFixed(1)})}`;
+        if (s.output_name) statusEl.textContent += `\n${tr('File name: {name}', {name: s.output_name})}`;
+        if (s.terrain) statusEl.textContent += `\n${tr('Terrain: {source}, relief {relief} mm', {source: tr(s.terrain.source), relief: s.terrain.relief_mm.toFixed(1)})}`;
+        if (s.water_cutout && s.water_cutout.enabled) statusEl.textContent += `\n${tr('Water cutout: on ({count} polygons)', {count: s.water_cutout.polygons})}`;
+        if (s.selection_shape) statusEl.textContent += `\n${tr('Selection shape: {shape}', {shape: tr(s.selection_shape)})}`;
+        if (s.area_infill_mode) statusEl.textContent += `\n${tr('Area infill mode: {mode}', {mode: tr(s.area_infill_mode)})}`;
+        if (s.route && s.route.enabled) statusEl.textContent += `\n${tr('Route: {points} points, {segments} clipped segment(s), {width} mm × {height} mm', {points: s.route.points, segments: s.route.clipped_segments, width: s.route.width_mm, height: s.route.height_mm})}`;
+        if (s.osm_tile_count) statusEl.textContent += `\n${tr('OSM tiles: {count}', {count: s.osm_tile_count})}`;
+        statusEl.textContent += `\n${tr('Features: {features}', {features: JSON.stringify(s.features)})}`;
+        if (s.selected_road_levels) statusEl.textContent += `\n${tr('Road levels: {levels}', {levels: s.selected_road_levels.join(', ') || tr('none')})}`;
+        if (s.chunk_export && s.chunk_export.enabled) statusEl.textContent += `\n${tr('Chunks: {rows} × {cols} ({pieces} files)', {rows: s.chunk_export.rows, cols: s.chunk_export.cols, pieces: s.chunk_export.pieces})}`;
         if (s.printability) {
-          statusEl.textContent += `\nPrintability: ${s.printability.score}/100 ${s.printability.grade}`;
+          statusEl.textContent += `\n${tr('Printability: {score}/100 {grade}', {score: s.printability.score, grade: s.printability.grade})}`;
           const issues = (s.printability.issues || []).slice(0, 4);
           issues.forEach(issue => {
-            statusEl.textContent += `\n- ${issue.level}: ${issue.message} ${issue.suggestion}`;
+            statusEl.textContent += `\n- ${tr(issue.level)}: ${tr(issue.message)} ${tr(issue.suggestion)}`;
           });
         }
         if (s.mesh_repair) {
           if (s.mesh_repair.enabled) {
             const before = (((s.mesh_repair.totals || {}).before) || {}).non_manifold_edges || 0;
             const after = (((s.mesh_repair.totals || {}).after) || {}).non_manifold_edges || 0;
-            statusEl.textContent += `\nMesh repair: ${s.mesh_repair.status}, non-manifold edges ${before} → ${after}`;
+            statusEl.textContent += `\n${tr('Mesh repair: {status}, non-manifold edges {before} → {after}', {status: tr(s.mesh_repair.status), before, after})}`;
           } else {
-            statusEl.textContent += '\nMesh repair: disabled';
+            statusEl.textContent += `\n${tr('Mesh repair: disabled')}`;
           }
         }
-        statusEl.textContent += `\n3MF triangles: ${s.validation_3mf.triangles}`;
+        statusEl.textContent += `\n${tr('3MF triangles: {count}', {count: s.validation_3mf.triangles})}`;
       }
       if (data.status === 'complete') {
         download3mf.href = data.downloads['3mf'];
@@ -1017,24 +1582,25 @@
           downloadChunks.classList.remove('disabled');
         }
         downloads.innerHTML = `
-          <a href="${data.downloads['3mf']}">Download 3MF</a>
-          ${data.downloads.chunks ? `<a href="${data.downloads.chunks}">Download chunk ZIP</a>` : ''}
-          <a href="${data.downloads.glb}">Download GLB</a>
-          <a href="${data.downloads.stl}">Download STL</a>
-          <a href="${data.downloads.attribution}">Attribution</a>
-          ${data.downloads.chunks_manifest ? `<a href="${data.downloads.chunks_manifest}">Chunk manifest</a>` : ''}
-          <a href="${data.downloads.summary}">Summary</a>`;
+          <a href="${data.downloads['3mf']}">${tr('Download 3MF')}</a>
+          ${data.downloads.chunks ? `<a href="${data.downloads.chunks}">${tr('Download chunk ZIP')}</a>` : ''}
+          <a href="${data.downloads.glb}">${tr('Download GLB')}</a>
+          <a href="${data.downloads.stl}">${tr('Download STL')}</a>
+          <a href="${data.downloads.attribution}">${tr('Attribution')}</a>
+          ${data.downloads.project ? `<a href="${data.downloads.project}">${tr('Project JSON')}</a>` : ''}
+          ${data.downloads.chunks_manifest ? `<a href="${data.downloads.chunks_manifest}">${tr('Chunk manifest')}</a>` : ''}
+          <a href="${data.downloads.summary}">${tr('Summary')}</a>`;
         document.getElementById('preview').src = `${data.downloads.glb}?t=${Date.now()}`;
         return;
       }
       if (data.status === 'failed') {
         if ((data.message || '').includes('OpenStreetMap data download failed')) {
-          statusEl.textContent += '\n\nNo API key or registration is required for normal Overpass use. Try dragging the selection box smaller, or retry later if the public server is busy.';
+          statusEl.textContent += `\n\n${tr('No API key or registration is required for normal Overpass use. Try dragging the selection box smaller, or retry later if the public server is busy.')}`;
         }
         if ((data.message || '').includes('terrain') || (data.message || '').includes('Open-Meteo')) {
-          statusEl.textContent += '\n\nAuto terrain uses a public elevation service and does not require registration. Turn it off or upload a DEM GeoTIFF if the service is busy.';
+          statusEl.textContent += `\n\n${tr('Auto terrain uses a public elevation service and does not require registration. Turn it off or upload a DEM GeoTIFF if the service is busy.')}`;
         }
-        downloads.innerHTML = data.error_log ? `<a href="${data.error_log}">Error log</a>` : '';
+        downloads.innerHTML = data.error_log ? `<a href="${data.error_log}">${tr('Error log')}</a>` : '';
         return;
       }
       await new Promise(resolve => setTimeout(resolve, 1200));
@@ -1053,19 +1619,21 @@
     downloadChunks.classList.add('disabled');
     document.getElementById('progress').value = 0;
     statusEl.classList.remove('failed');
-    statusEl.textContent = 'Submitting job...';
+    statusEl.textContent = tr('Submitting job...');
     const form = new FormData();
     form.append('params', JSON.stringify(params()));
     const dem = document.getElementById('dem_file').files[0];
     if (dem) form.append('dem_file', dem);
+    const routeFile = document.getElementById('route_file').files[0];
+    if (routeFile) form.append('route_file', routeFile);
     try {
       const res = await fetch('/api/jobs', {method: 'POST', body: form});
       const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'Job submission failed');
+      if (!res.ok) throw new Error(data.detail || tr('Job submission failed'));
       poll(data.job_id);
     } catch (err) {
       statusEl.classList.add('failed');
-      statusEl.textContent = `Failed to submit: ${err.message}`;
+      statusEl.textContent = tr('Failed to submit: {message}', {message: err.message});
     }
   });
 
@@ -1082,15 +1650,15 @@
     downloadChunks.classList.add('disabled');
     document.getElementById('progress').value = 0;
     statusEl.classList.remove('failed');
-    statusEl.textContent = 'Submitting sample job...';
+    statusEl.textContent = tr('Submitting sample job...');
     try {
       const res = await fetch('/api/sample', {method: 'POST'});
       const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'Sample submission failed');
+      if (!res.ok) throw new Error(data.detail || tr('Sample submission failed'));
       poll(data.job_id);
     } catch (err) {
       statusEl.classList.add('failed');
-      statusEl.textContent = `Failed to submit sample: ${err.message}`;
+      statusEl.textContent = tr('Failed to submit sample: {message}', {message: err.message});
     }
   });
 
@@ -1107,16 +1675,21 @@
     try {
       const res = await fetch('/api/cache/status');
       const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'Cache status failed');
-      statusEl.textContent = `Generated files: ${formatBytes(data.jobs_bytes + data.outputs_bytes)}. OSM cache: ${formatBytes(data.osm_cache_bytes)}. Elevation cache: ${formatBytes(data.elevation_cache_bytes)}. Terrain cache: ${formatBytes(data.terrain_cache_bytes)}.`;
+      if (!res.ok) throw new Error(data.detail || tr('Cache status failed'));
+      statusEl.textContent = tr('Generated files: {generated}. OSM cache: {osm}. Elevation cache: {elevation}. Terrain cache: {terrain}.', {
+        generated: formatBytes(data.jobs_bytes + data.outputs_bytes),
+        osm: formatBytes(data.osm_cache_bytes),
+        elevation: formatBytes(data.elevation_cache_bytes),
+        terrain: formatBytes(data.terrain_cache_bytes),
+      });
     } catch (err) {
-      statusEl.textContent = `Cache status failed: ${err.message}`;
+      statusEl.textContent = tr('Cache status failed: {message}', {message: err.message});
     }
   }
 
   async function clearCache() {
     const statusEl = document.getElementById('cacheStatus');
-    statusEl.textContent = 'Clearing cache...';
+    statusEl.textContent = tr('Clearing cache...');
     try {
       const res = await fetch('/api/cache/clear', {
         method: 'POST',
@@ -1129,7 +1702,7 @@
         }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'Cache clear failed');
+      if (!res.ok) throw new Error(data.detail || tr('Cache clear failed'));
       if (data.cleared.includes('jobs') || data.cleared.includes('outputs')) {
         document.getElementById('downloads').innerHTML = '';
         document.getElementById('download3mf').href = '#';
@@ -1138,14 +1711,24 @@
         document.getElementById('downloadChunks').classList.add('disabled');
         document.getElementById('preview').removeAttribute('src');
       }
-      statusEl.textContent = `Cleared ${data.cleared.join(', ') || 'nothing'}: ${formatBytes(data.removed_bytes)} removed. Generated files now ${formatBytes(data.after.jobs_bytes + data.after.outputs_bytes)}, OSM cache ${formatBytes(data.after.osm_cache_bytes)}, elevation cache ${formatBytes(data.after.elevation_cache_bytes)}, terrain cache ${formatBytes(data.after.terrain_cache_bytes)}.`;
+      statusEl.textContent = tr('Cleared {cleared}: {removed} removed. Generated files now {generated}, OSM cache {osm}, elevation cache {elevation}, terrain cache {terrain}.', {
+        cleared: data.cleared.map(item => tr(item)).join(', ') || tr('nothing'),
+        removed: formatBytes(data.removed_bytes),
+        generated: formatBytes(data.after.jobs_bytes + data.after.outputs_bytes),
+        osm: formatBytes(data.after.osm_cache_bytes),
+        elevation: formatBytes(data.after.elevation_cache_bytes),
+        terrain: formatBytes(data.after.terrain_cache_bytes),
+      });
     } catch (err) {
-      statusEl.textContent = `Clear failed: ${err.message}`;
+      statusEl.textContent = tr('Clear failed: {message}', {message: err.message});
     }
   }
 
   document.getElementById('clearCache').addEventListener('click', clearCache);
-  refreshCacheStatus();
+  document.querySelectorAll('[data-lang-option]').forEach(button => {
+    button.addEventListener('click', () => setLanguage(button.dataset.langOption));
+  });
+  setLanguage(currentLanguage, false);
 
 </script>
 </body>

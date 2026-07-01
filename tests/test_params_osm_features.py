@@ -69,6 +69,25 @@ def test_model_params_auto_repair_mesh_defaults_on_and_can_disable():
     assert disabled.auto_repair_mesh is False
 
 
+def test_model_params_accepts_saved_route_segments():
+    params = ModelParams.from_dict({
+        "bbox": [47.62, -122.355, 47.626, -122.3455],
+        "include_route": "true",
+        "route_width_mm": "1.4",
+        "route_height_mm": "0.9",
+        "route_offset_mm": "0.2",
+        "route_name": "walk.gpx",
+        "route_segments": [[[47.621, -122.352], [47.622, -122.351]]],
+    })
+
+    assert params.include_route is True
+    assert params.route_width_mm == 1.4
+    assert params.route_height_mm == 0.9
+    assert params.route_offset_mm == 0.2
+    assert params.route_name == "walk.gpx"
+    assert params.route_segments == [[[47.621, -122.352], [47.622, -122.351]]]
+
+
 def test_model_params_accepts_auto_terrain():
     params = ModelParams.from_dict({
         "bbox": [47.62, -122.355, 47.626, -122.3455],

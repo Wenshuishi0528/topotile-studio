@@ -1,5 +1,9 @@
 import pytest
+import asyncio
+import json
+from io import BytesIO
 from fastapi import HTTPException
+from fastapi import UploadFile
 
 from app import main
 
@@ -114,6 +118,7 @@ def test_job_downloads_use_summary_file_names():
             "attribution": "ATTRIBUTION.txt",
             "chunks_zip": "UW_Campus_chunks.zip",
             "chunks_manifest": "UW_Campus_chunks_manifest.json",
+            "project": "UW_Campus_project.json",
         }
     }
 
@@ -124,3 +129,43 @@ def test_job_downloads_use_summary_file_names():
     assert downloads["stl"].endswith("/UW_Campus.stl")
     assert downloads["chunks"].endswith("/UW_Campus_chunks.zip")
     assert downloads["chunks_manifest"].endswith("/UW_Campus_chunks_manifest.json")
+    assert downloads["project"].endswith("/UW_Campus_project.json")
+
+
+def test_create_job_parses_uploaded_route_file(tmp_path, monkeypatch):
+    jobs = tmp_path / "jobs"
+    outputs = tmp_path / "outputs"
+    cache = tmp_path / "cache"
+    for path in (jobs, outputs, cache):
+        path.mkdir(parents=True)
+
+    captured = {}
+
+    def fake_submit_job(job_id, fn, params_data, dem_path):
+        captured["job_id"] = job_id
+        captured["params_data"] = params_data
+        captured["dem_path"] = dem_path
+
+    monkeypatch.setattr(main, "JOBS_DIR", jobs)
+    monkeypatch.setattr(main, "OUTPUTS_DIR", outputs)
+    monkeypatch.setattr(main, "CACHE_DIR", cache)
+    monkeypatch.setattr(main, "submit_job", fake_submit_job)
+
+    gpx = b"""<?xml version="1.0"?>
+    <gpx version="1.1"><trk><trkseg>
+      <trkpt lat="47.6200" lon="-122.3500" />
+      <trkpt lat="47.6210" lon="-122.3490" />
+    </trkseg></trk></gpx>"""
+    route_file = UploadFile(filename="walk.gpx", file=BytesIO(gpx))
+    params = {
+        "bbox": [47.62, -122.355, 47.626, -122.3455],
+        "include_route": True,
+    }
+
+    result = asyncio.run(main.create_job(params=json.dumps(params), dem_file=None, route_file=route_file))
+
+    assert result["job_id"] == captured["job_id"]
+    assert captured["dem_path"] is None
+    assert captured["params_data"]["route_name"] == "walk.gpx"
+    assert captured["params_data"]["route_segments"] == [[[47.62, -122.35], [47.621, -122.349]]]
+    assert (jobs / captured["job_id"] / "route.gpx").exists()

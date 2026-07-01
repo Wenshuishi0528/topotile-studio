@@ -94,12 +94,18 @@ Open:
 http://127.0.0.1:8000
 ```
 
-## Generate a sample without internet
+## Generate the built-in offline test model without internet
 
-This creates a synthetic `.3mf` and `.glb` so you can test Bambu Studio import immediately.
+This creates the bundled `.3mf`, `.glb`, `.stl`, and project JSON so you can test Bambu Studio import immediately without OSM/API access.
 
 ```bash
 python scripts/generate_sample.py
+```
+
+On macOS, you can also double-click:
+
+```text
+Open_Offline_Test_Model.command
 ```
 
 Outputs go to:

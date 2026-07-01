@@ -18,18 +18,26 @@ from .export_glb import write_glb
 from .export_stl import write_stl
 from .geo import make_local_projection, make_scaler
 from .mesh_ops import (
+    COLORS,
     terrain_to_mesh,
     build_building_meshes,
     build_surface_layer_meshes,
+    build_route_meshes,
     water_cutout_polygons_mm,
+    water_union_geometry_m,
 )
 from .mesh_repair import repair_mesh_parts
 from .mesh_types import MeshPart
 from .osm import fetch_osm_json, fetch_osm_json_tiled, parse_osm_features, save_osm_json, OSMFeature
 from .params import ModelParams, safe_output_stem
 from .printability import printability_report
+from .routes import route_point_count, route_segments_to_local_lines
 
 Progress = Callable[[str, float], None]
+ROOT = Path(__file__).resolve().parents[1]
+SAMPLE_DIR = ROOT / "data" / "samples"
+OFFLINE_SAMPLE_3MF = SAMPLE_DIR / "offline_test_model.3mf"
+OFFLINE_SAMPLE_PROJECT = SAMPLE_DIR / "offline_test_model_project.json"
 
 
 def _progress(progress: Progress | None, message: str, value: float) -> None:
@@ -248,6 +256,7 @@ def generate_model(
     parking = [f for f in features if f.layer == "parking"]
     airport = [f for f in features if f.layer == "airport"]
     area_infill = [f for f in features if f.layer == "area_infill"]
+    route_lines = route_segments_to_local_lines(params.route_segments, projection, clip_m) if params.include_route else []
 
     water_cutouts = water_cutout_polygons_mm(water, scaler, params) if params.cut_out_water else []
     terrain_part = terrain_to_mesh(terrain, cutouts_mm=water_cutouts, footprint_mm=footprint_mm)
@@ -272,6 +281,12 @@ def generate_model(
         terrain,
         params,
     ))
+    if params.include_route:
+        _progress(progress, f"Building route track layer from {route_point_count(params.route_segments)} points", 0.76)
+        route_water_union = water_union_geometry_m(water, scaler, params) if params.cut_out_water else None
+        route_part = build_route_meshes(route_lines, scaler, terrain, params, route_water_union)
+        if not route_part.is_empty():
+            parts.append(route_part)
     parts = [p.cleaned() for p in parts if not p.cleaned().is_empty()]
 
     if not parts:
@@ -327,6 +342,16 @@ def generate_model(
             "parking": len(parking),
             "airport": len(airport),
             "area_infill": len(area_infill),
+            "route_points": route_point_count(params.route_segments) if params.include_route else 0,
+        },
+        "route": {
+            "enabled": params.include_route,
+            "name": params.route_name,
+            "segments": len(params.route_segments) if params.include_route else 0,
+            "points": route_point_count(params.route_segments) if params.include_route else 0,
+            "clipped_segments": len(route_lines),
+            "width_mm": params.route_width_mm,
+            "height_mm": params.route_height_mm,
         },
         "selected_road_levels": params.road_levels,
         "mesh_parts": [
@@ -408,15 +433,123 @@ def make_synthetic_osm_json(south: float, west: float, north: float, east: float
 
 
 def generate_sample(output_dir: str | Path) -> dict[str, Any]:
-    params = ModelParams(
-        south=47.6200,
-        west=-122.3550,
-        north=47.6260,
-        east=-122.3455,
-        max_size_mm=160,
-        base_thickness_mm=3,
-        vertical_exaggeration=1.5,
-        project_name="Synthetic Sample City Model",
-    )
-    osm_json = make_synthetic_osm_json(params.south, params.west, params.north, params.east)
-    return generate_model(params, output_dir, dem_path=None, osm_json_override=osm_json)
+    start = time.time()
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    if not OFFLINE_SAMPLE_3MF.exists() or not OFFLINE_SAMPLE_PROJECT.exists():
+        raise FileNotFoundError("Bundled offline test model files are missing.")
+
+    try:
+        import numpy as np
+        import trimesh
+    except Exception as exc:  # pragma: no cover
+        raise RuntimeError("trimesh and numpy are required for bundled sample export") from exc
+
+    project_data = json.loads(OFFLINE_SAMPLE_PROJECT.read_text(encoding="utf-8"))
+    params = ModelParams.from_dict(project_data.get("params") or project_data)
+    params.project_name = "TopoTile Studio Offline Test Model"
+    params.output_name = "offline_test_model"
+    saved_project = json.loads(json.dumps(project_data, ensure_ascii=False))
+    saved_params = saved_project.setdefault("params", {})
+    if isinstance(saved_params, dict):
+        saved_params["output_name"] = params.output_name
+        saved_params["project_name"] = params.project_name
+    base_name = safe_output_stem(params.output_name)
+
+    scene = trimesh.load(OFFLINE_SAMPLE_3MF, force="scene", process=False)
+    parts: list[MeshPart] = []
+    for name, mesh in scene.geometry.items():
+        vertices = np.asarray(mesh.vertices, dtype=float)
+        faces = np.asarray(mesh.faces, dtype=np.int64)
+        part_name = str(name or "sample")
+        color = COLORS.get(part_name, (180, 180, 180, 255))
+        parts.append(MeshPart(part_name, vertices, faces, color).cleaned())
+    parts = [part for part in parts if not part.is_empty()]
+    if not parts:
+        raise RuntimeError("Bundled offline test model has no usable mesh geometry.")
+
+    projection = make_local_projection(params.south, params.west, params.north, params.east)
+    scaler = make_scaler(projection.width_m, projection.height_m, params.max_size_mm)
+
+    path_3mf = write_3mf(parts, output_dir / f"{base_name}.3mf", title=params.project_name)
+    path_glb = write_glb(parts, output_dir / f"{base_name}.glb")
+    path_stl = write_stl(parts, output_dir / f"{base_name}.stl")
+    path_project = output_dir / f"{base_name}_project.json"
+    path_project.write_text(json.dumps(saved_project, ensure_ascii=False, indent=2), encoding="utf-8")
+    path_attr = output_dir / "ATTRIBUTION.txt"
+    path_attr.write_text(attribution_text(params, terrain_source="flat"), encoding="utf-8")
+
+    z_values = np.concatenate([part.vertices[:, 2] for part in parts])
+    feature_names = {p.name for p in parts}
+    summary: dict[str, Any] = {
+        "bbox": params.bbox_tuple,
+        "projection_epsg": projection.epsg,
+        "area_width_m": projection.width_m,
+        "area_height_m": projection.height_m,
+        "model_width_mm": scaler.width_mm,
+        "model_height_mm": scaler.height_mm,
+        "scale_mm_per_m": scaler.scale_mm_per_m,
+        "output_name": base_name,
+        "sample": {
+            "enabled": True,
+            "name": "Offline test model",
+            "source_3mf": OFFLINE_SAMPLE_3MF.name,
+            "source_project": OFFLINE_SAMPLE_PROJECT.name,
+        },
+        "terrain": {
+            "source": "bundled_tiananmen_sample",
+            "grid": [0, 0],
+            "z_min_mm": float(z_values.min()),
+            "z_max_mm": float(z_values.max()),
+            "relief_mm": float(z_values.max() - z_values.min()),
+        },
+        "large_map_mode": params.large_map_mode,
+        "selection_shape": params.selection_shape,
+        "area_infill_mode": params.area_infill_mode,
+        "road_cleaning_level": params.road_cleaning_level,
+        "water_cutout": {"enabled": params.cut_out_water, "polygons": 0},
+        "features": {
+            "buildings": 1 if "buildings" in feature_names else 0,
+            "roads": 1 if "roads" in feature_names else 0,
+            "road_candidates": 1 if "roads" in feature_names else 0,
+            "water": 1 if "water" in feature_names else 0,
+            "green": 1 if "green" in feature_names else 0,
+            "parking": 1 if "parking" in feature_names else 0,
+            "airport": 1 if "airport" in feature_names else 0,
+            "area_infill": 1 if "area_infill" in feature_names else 0,
+            "route_points": 0,
+            "bundled_sample_objects": len(parts),
+        },
+        "route": {"enabled": False, "name": "", "segments": 0, "points": 0, "clipped_segments": 0},
+        "selected_road_levels": params.road_levels,
+        "mesh_parts": [
+            {"name": p.name, "vertices": int(len(p.vertices)), "triangles": int(len(p.faces))}
+            for p in parts
+        ],
+        "mesh_repair": {
+            "enabled": False,
+            "status": "bundled_sample",
+            "totals": {
+                "before": {"non_manifold_edges": 0},
+                "after": {"non_manifold_edges": 0},
+            },
+        },
+        "files": {
+            "3mf": path_3mf.name,
+            "glb": path_glb.name,
+            "stl": path_stl.name,
+            "attribution": path_attr.name,
+            "project": path_project.name,
+        },
+        "validation_3mf": validate_3mf(path_3mf),
+        "seconds": round(time.time() - start, 3),
+        "chunk_export": {
+            "enabled": False,
+            "rows": params.chunk_rows,
+            "cols": params.chunk_cols,
+            "pieces": 0,
+        },
+    }
+    summary["printability"] = printability_report(params, summary)
+    (output_dir / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    return summary

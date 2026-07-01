@@ -17,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 
 from city_modeler.params import ModelParams
 from city_modeler.pipeline import generate_model, generate_sample
+from city_modeler.routes import parse_route_text
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT / "data"
@@ -80,6 +81,8 @@ def job_downloads(job_id: str, summary: dict[str, Any]) -> dict[str, str]:
         downloads["chunks"] = file_url(job_id, str(files["chunks_zip"]))
     if files.get("chunks_manifest"):
         downloads["chunks_manifest"] = file_url(job_id, str(files["chunks_manifest"]))
+    if files.get("project"):
+        downloads["project"] = file_url(job_id, str(files["project"]))
     return downloads
 
 
@@ -220,7 +223,7 @@ def run_sample_job(job_id: str) -> None:
     out = OUTPUTS_DIR / job_id
     out.mkdir(parents=True, exist_ok=True)
     try:
-        write_status(job_id, {"job_id": job_id, "status": "running", "message": "Generating synthetic sample", "progress": 0.2})
+        write_status(job_id, {"job_id": job_id, "status": "running", "message": "Preparing built-in offline test model", "progress": 0.2})
         summary = generate_sample(out)
         write_status(job_id, {
             "job_id": job_id,
@@ -250,9 +253,34 @@ def index() -> HTMLResponse:
 
 
 @app.post("/api/jobs")
-async def create_job(params: str = Form(...), dem_file: UploadFile | None = File(default=None)) -> dict[str, Any]:
+async def create_job(
+    params: str = Form(...),
+    dem_file: UploadFile | None = File(default=None),
+    route_file: UploadFile | None = File(default=None),
+) -> dict[str, Any]:
     try:
         params_data = json.loads(params)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid params JSON: {exc}") from exc
+
+    route_bytes: bytes | None = None
+    route_suffix = ""
+    if route_file is not None and route_file.filename:
+        route_suffix = Path(route_file.filename).suffix.lower()
+        if route_suffix not in {".gpx", ".kml"}:
+            raise HTTPException(status_code=400, detail="Route upload must be a GPX .gpx or KML .kml file")
+        route_bytes = await route_file.read()
+        try:
+            route_text = route_bytes.decode("utf-8-sig")
+        except UnicodeDecodeError as exc:
+            raise HTTPException(status_code=400, detail="Route upload must be UTF-8 encoded GPX/KML XML") from exc
+        try:
+            params_data["route_segments"] = parse_route_text(route_text, route_file.filename)
+            params_data["route_name"] = Path(route_file.filename).name
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid route file: {exc}") from exc
+
+    try:
         ModelParams.from_dict(params_data)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Invalid params: {exc}") from exc
@@ -269,6 +297,9 @@ async def create_job(params: str = Form(...), dem_file: UploadFile | None = File
         with dem_path_obj.open("wb") as f:
             shutil.copyfileobj(dem_file.file, f)
         dem_path = str(dem_path_obj)
+    if route_bytes is not None and route_file is not None and route_file.filename:
+        route_path_obj = jd / f"route{route_suffix}"
+        route_path_obj.write_bytes(route_bytes)
 
     write_status(job_id, {"job_id": job_id, "status": "queued", "message": "Queued", "progress": 0.0})
     submit_job(job_id, run_job, params_data, dem_path)

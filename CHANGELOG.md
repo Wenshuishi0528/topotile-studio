@@ -6,6 +6,52 @@ Time zone: local macOS time. Some early entries are reconstructed from request o
 
 ## 2026-06-30
 
+### 17:46 - English/Chinese Interface Toggle
+
+- Added a header language switch for English and Chinese UI text.
+- Translated main form labels, buttons, helper text, selection hints, terrain/cache/project messages, generation status, download labels, and common printability warnings.
+- Saved the preferred language in browser local storage so the page keeps the selected language after reload.
+- Bumped the app version to `v0.33.0`.
+
+### 17:24 - Offline Sample Button English Label
+
+- Changed the built-in sample button label from `离线测试模型` to `Offline Test Model`.
+
+### 17:18 - Header Author Text
+
+- Changed the page header author credit from `Shuishi.Wen` to `Made by Wenshuishi`.
+
+### 17:09 - Offline Sample Label and Author Credit
+
+- Renamed the visible built-in sample button to `离线测试模型` so the sample content is not directly exposed in the UI.
+- Changed visible sample helper text, backend status text, script output, and one-click script naming to generic offline-test-model wording.
+- Changed offline sample export file names to generic `offline_test_model.*` names.
+- Added the author credit `Shuishi.Wen` to the top-right of the page header.
+- Bumped the app version to `v0.32.1`.
+
+### 16:58 - Built-in Tiananmen Offline Sample
+
+- Replaced the previous synthetic offline sample with a bundled Tiananmen test model based on the provided `天安门-测试.3mf` and project JSON.
+- The offline sample now generates `.3mf`, `.glb`, `.stl`, attribution text, summary JSON, and project JSON without using OSM/API network access.
+- Moved the sample button near the top of the left toolbar and renamed it `Tiananmen offline sample` so it is easier to find.
+- Added `Open_Tiananmen_Offline_Sample.command` as a one-click macOS script that exports the bundled sample into `~/Downloads/TopoTile_Tiananmen_Offline_Sample/`.
+- Updated sample generation docs and tests for the bundled Tiananmen sample.
+- Bumped the app version to `v0.32.0`.
+
+### 16:35 - GPX/KML Raised Route Layer
+
+- Added a `Route / Track` layer that accepts GPX or KML files and prints the track as an independent raised line over the model.
+- Added route controls for width, height, and terrain offset, plus map preview, clear route, and fit-selection-to-route actions.
+- Saved route points in project JSON so loaded projects can regenerate the same route without requiring the original GPX/KML file.
+- Routed uploaded GPX/KML files through backend parsing during job submission so generation uses validated route data.
+- Generated route meshes as their own red `route` mesh part that follows terrain relief and stays raised over cut-out water crossings.
+- Bumped the app version to `v0.31.0`.
+- Added regression coverage for GPX/KML parsing, saved route parameters, terrain-following route meshes, and full model generation with a route part.
+
+### 15:43 - Project Handoff Notes
+
+- Added `HANDOFF.md` with current version, run commands, backup state, architecture notes, geometry design decisions, validation projects, risk areas, and backup workflow.
+
 ### 14:45 - Terrain-Fitted Building Bases
 
 - Changed terrain-mode building extrusion so building bottoms follow sampled terrain instead of using one flat centroid height.

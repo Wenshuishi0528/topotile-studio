@@ -36,6 +36,41 @@ DEFAULT_ROAD_LEVELS = [
 ]
 
 
+def normalize_route_segments(value: object, max_points: int = 60000) -> list[list[list[float]]]:
+    if not isinstance(value, list):
+        return []
+    segments: list[list[list[float]]] = []
+    point_count = 0
+    for raw_segment in value:
+        if not isinstance(raw_segment, list):
+            continue
+        segment: list[list[float]] = []
+        previous: tuple[int, int] | None = None
+        for raw_point in raw_segment:
+            if not isinstance(raw_point, (list, tuple)) or len(raw_point) < 2:
+                continue
+            try:
+                lat = float(raw_point[0])
+                lon = float(raw_point[1])
+            except (TypeError, ValueError):
+                continue
+            if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+                continue
+            key = (int(round(lat * 1_000_000)), int(round(lon * 1_000_000)))
+            if key == previous:
+                continue
+            previous = key
+            segment.append([lat, lon])
+            point_count += 1
+            if point_count >= max_points:
+                break
+        if len(segment) >= 2:
+            segments.append(segment)
+        if point_count >= max_points:
+            break
+    return segments
+
+
 def safe_output_stem(value: object, default: str = "city_model") -> str:
     stem = str(value or "").strip()
     for suffix in (".3mf", ".glb", ".stl", ".zip"):
@@ -67,6 +102,9 @@ class ModelParams:
     pedestrian_width_mm: float = 0.60
     bridge_clearance_mm: float = 2.5
     area_infill_height_mm: float = 0.60
+    route_width_mm: float = 1.20
+    route_height_mm: float = 0.80
+    route_offset_mm: float = 0.15
     terrain_grid_size: int = 96
     max_terrain_height_mm: float = 35.0
     simplify_tolerance_mm: float = 0.15
@@ -89,6 +127,7 @@ class ModelParams:
     include_parking: bool = True
     include_airport: bool = True
     include_area_infill: bool = True
+    include_route: bool = False
 
     osm_overpass_url: str = "https://overpass-api.de/api/interpreter"
     road_levels: list[str] = field(default_factory=lambda: list(DEFAULT_ROAD_LEVELS))
@@ -96,6 +135,8 @@ class ModelParams:
     project_name: str = "TopoTile Studio City Tile"
     output_name: str = "city_model"
     area_infill_mode: str = "empty_areas"
+    route_name: str = ""
+    route_segments: list[list[list[float]]] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ModelParams":
@@ -120,7 +161,7 @@ class ModelParams:
             "vertical_exaggeration", "building_height_multiplier", "default_building_height_m",
             "level_height_m", "min_building_height_mm", "max_building_height_mm",
             "min_road_width_mm", "footway_width_mm", "pedestrian_width_mm", "bridge_clearance_mm",
-            "area_infill_height_mm",
+            "area_infill_height_mm", "route_width_mm", "route_height_mm", "route_offset_mm",
             "max_terrain_height_mm", "simplify_tolerance_mm",
             "osm_tile_size_km",
         }
@@ -128,7 +169,7 @@ class ModelParams:
         bool_fields = {
             "auto_terrain", "large_map_mode", "cut_out_water", "chunk_export", "auto_repair_mesh",
             "include_buildings", "include_roads", "include_water", "include_green", "include_parking",
-            "include_airport", "include_area_infill"
+            "include_airport", "include_area_infill", "include_route"
         }
 
         for key in numeric_fields & filtered.keys():
@@ -153,6 +194,8 @@ class ModelParams:
                 levels = [str(v) for v in value]
             supported = set(ROAD_LEVELS)
             filtered["road_levels"] = [level for level in levels if level in supported]
+        if "route_segments" in filtered:
+            filtered["route_segments"] = normalize_route_segments(filtered["route_segments"])
 
         obj = cls(**filtered)
         obj.validate()
@@ -181,6 +224,12 @@ class ModelParams:
             raise ValueError("bridge_clearance_mm must be between 0 and 30.")
         if self.area_infill_height_mm < 0.05 or self.area_infill_height_mm > 10:
             raise ValueError("area_infill_height_mm must be between 0.05 and 10.")
+        if self.route_width_mm < 0.15 or self.route_width_mm > 20:
+            raise ValueError("route_width_mm must be between 0.15 and 20.")
+        if self.route_height_mm < 0.05 or self.route_height_mm > 20:
+            raise ValueError("route_height_mm must be between 0.05 and 20.")
+        if self.route_offset_mm < 0 or self.route_offset_mm > 30:
+            raise ValueError("route_offset_mm must be between 0 and 30.")
         if self.selection_shape not in SELECTION_SHAPES:
             raise ValueError(f"selection_shape must be one of: {', '.join(SELECTION_SHAPES)}")
         if self.area_infill_mode not in AREA_INFILL_MODES:
@@ -197,6 +246,9 @@ class ModelParams:
         unsupported = sorted(set(self.road_levels) - set(ROAD_LEVELS))
         if unsupported:
             raise ValueError(f"Unsupported road level(s): {', '.join(unsupported)}")
+        self.route_segments = normalize_route_segments(self.route_segments)
+        if self.include_route and not self.route_segments:
+            raise ValueError("include_route requires an uploaded GPX/KML route or saved route points.")
 
     @property
     def bbox_tuple(self) -> tuple[float, float, float, float]:
