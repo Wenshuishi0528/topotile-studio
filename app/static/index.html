@@ -103,7 +103,9 @@
       color: #334155;
       margin: 0;
     }
+    .preview-toolbar label { display: flex; align-items: center; gap: 6px; margin: 0; color: inherit; font-size: 12px; font-weight: 800; }
     .preview-toolbar input { width: auto; }
+    .preview-toolbar button { margin: 0; padding: 5px 8px; border: 1px solid #cbd5e1; background: #f8fafc; color: #334155; font-size: 12px; }
     .checks { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
     .road-checks { grid-template-columns: 1fr 1fr; }
     .check { display: flex; align-items: center; gap: 6px; font-size: 13px; }
@@ -134,7 +136,7 @@
 </head>
 <body>
 <header>
-  <h1>TopoTile Studio <span class="app-version" id="appVersionLabel">v0.36.1</span></h1>
+  <h1>TopoTile Studio <span class="app-version" id="appVersionLabel">v0.36.2</span></h1>
   <div class="header-actions">
     <div class="author-name">Made by Wenshuishi</div>
     <div class="language-switch" aria-label="Language">
@@ -325,12 +327,15 @@
     <div class="viewer-resizer" id="viewerResizer" role="separator" aria-orientation="horizontal" aria-label="Resize map and preview panes"></div>
     <div class="preview-shell">
       <model-viewer id="preview" camera-controls auto-rotate shadow-intensity="0.7" exposure="0.95" alt="3D preview will appear after generation"></model-viewer>
-      <label class="preview-toolbar"><input id="preview_auto_rotate" type="checkbox" checked> Auto rotate</label>
+      <div class="preview-toolbar">
+        <button id="preview_reset_pan" type="button" title="Reset preview position">Reset position</button>
+        <label><input id="preview_auto_rotate" type="checkbox" checked> Auto rotate</label>
+      </div>
     </div>
   </section>
 </main>
 <script>
-  const APP_VERSION = '0.36.1';
+  const APP_VERSION = '0.36.2';
   document.getElementById('appVersionLabel').textContent = `v${APP_VERSION}`;
 
   const LANGUAGE_STORAGE_KEY = 'topotile.language';
@@ -440,6 +445,8 @@
     'Clear cache': '清理缓存',
     'Cache status not loaded.': '缓存状态未加载。',
     'Idle.': '空闲。',
+    'Reset position': '回到原位',
+    'Reset preview position': '预览回到原位',
     'Auto rotate': '自动旋转',
     'Detailed: keeps service roads, paths, cycleways, tracks, and steps.': '详细：保留服务道路、小径、自行车道、土路和台阶。',
     'Clean: removes minor pedestrian/service detail.': '清爽：移除较小的步行/服务道路细节。',
@@ -490,6 +497,7 @@
     'Mesh repair: {status}, non-manifold edges {before} → {after}': '网格修复：{status}，非流形边 {before} → {after}',
     'Mesh repair: disabled': '网格修复：已关闭',
     '3MF triangles: {count}': '3MF 三角面数：{count}',
+    'Generated at: {time}': '生成时间：{time}',
     'No API key or registration is required for normal Overpass use. Try dragging the selection box smaller, or retry later if the public server is busy.': '正常使用 Overpass 不需要 API key 或注册。请尝试缩小选择框；如果公共服务器繁忙，稍后再试。',
     'Auto terrain uses a public elevation service and does not require registration. Turn it off or upload a DEM GeoTIFF if the service is busy.': '自动地形使用公共高程服务，不需要注册。如果服务繁忙，请关闭它或上传 DEM GeoTIFF。',
     'Download GLB': '下载 GLB',
@@ -612,6 +620,11 @@
 
   function trStatus(status) {
     return currentLanguage === 'zh' ? (STATUS_ZH[status] || status) : status;
+  }
+
+  function formatLocalMinute(date) {
+    const pad = value => String(value).padStart(2, '0');
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
   }
 
   function translateTextNodes(root = document.body) {
@@ -1315,6 +1328,7 @@
 
   const preview = document.getElementById('preview');
   const previewShell = preview.closest('.preview-shell');
+  const previewResetPan = document.getElementById('preview_reset_pan');
   const previewAutoRotate = document.getElementById('preview_auto_rotate');
   let previewBaseRadius = null;
   let previewPanOffset = {x: 0, y: 0};
@@ -1415,6 +1429,7 @@
   }
 
   previewAutoRotate.addEventListener('change', syncPreviewAutoRotate);
+  previewResetPan.addEventListener('click', resetPreviewPanOffset);
   preview.addEventListener('load', () => {
     rememberPreviewRadius();
     resetPreviewPanOffset();
@@ -1729,6 +1744,7 @@
         statusEl.textContent += `\n${tr('3MF triangles: {count}', {count: s.validation_3mf.triangles})}`;
       }
       if (data.status === 'complete') {
+        statusEl.textContent += `\n${tr('Generated at: {time}', {time: data.completed_at || formatLocalMinute(new Date())})}`;
         download3mf.href = data.downloads['3mf'];
         download3mf.classList.remove('disabled');
         if (data.downloads.chunks) {

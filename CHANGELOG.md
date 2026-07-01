@@ -6,6 +6,13 @@ Time zone: local macOS time. Some early entries are reconstructed from request o
 
 ## 2026-07-01
 
+### 00:53 - Preview Reset and Completion Timestamp
+
+- Added a `Reset position` button in the 3D preview toolbar to return the preview pan offset to the original centered position.
+- Added a backend `completed_at` timestamp for normal and offline sample jobs using local 24-hour `YYYY-MM-DD HH:mm` format.
+- Shows the generated-at timestamp in the left completion log.
+- Bumped the app version to `v0.36.2`.
+
 ### 00:40 - Preview Pan Rewrite
 
 - Rewrote middle-mouse preview panning as a pure 2D screen-space shift of the preview layer instead of changing the 3D camera target.

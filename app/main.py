@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import Future
+from datetime import datetime
 from pathlib import Path
 from threading import Lock
 from urllib.parse import quote
@@ -178,6 +179,10 @@ def terminal_status(status: str) -> bool:
     return status in {"complete", "failed", "cancelled"}
 
 
+def completed_at_timestamp() -> str:
+    return datetime.now().strftime("%Y-%m-%d %H:%M")
+
+
 def clear_directory_contents(path: Path) -> int:
     root = DATA_DIR.resolve()
     target = path.resolve()
@@ -250,6 +255,7 @@ def run_job(job_id: str, params_data: dict[str, Any], dem_path: str | None) -> N
             "status": "complete",
             "message": "Complete",
             "progress": 1.0,
+            "completed_at": completed_at_timestamp(),
             "summary": summary,
             "downloads": job_downloads(job_id, summary),
         })
@@ -290,6 +296,7 @@ def run_sample_job(job_id: str) -> None:
             "status": "complete",
             "message": "Complete",
             "progress": 1.0,
+            "completed_at": completed_at_timestamp(),
             "summary": summary,
             "downloads": job_downloads(job_id, summary),
         })
