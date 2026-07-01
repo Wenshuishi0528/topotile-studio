@@ -91,6 +91,7 @@
       bottom: 12px;
       z-index: 2;
       display: flex;
+      flex-direction: column;
       align-items: center;
       gap: 8px;
       padding: 8px 10px;
@@ -103,9 +104,9 @@
       color: #334155;
       margin: 0;
     }
-    .preview-toolbar label { display: flex; align-items: center; gap: 6px; margin: 0; color: inherit; font-size: 12px; font-weight: 800; }
+    .preview-toolbar label { display: flex; align-items: center; justify-content: center; gap: 6px; margin: 0; color: inherit; font-size: 12px; font-weight: 800; white-space: nowrap; }
     .preview-toolbar input { width: auto; }
-    .preview-toolbar button { margin: 0; padding: 5px 8px; border: 1px solid #cbd5e1; background: #f8fafc; color: #334155; font-size: 12px; }
+    .preview-toolbar button { width: 100%; margin: 0; padding: 5px 8px; border: 1px solid #cbd5e1; background: #f8fafc; color: #334155; font-size: 12px; white-space: nowrap; }
     .checks { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
     .road-checks { grid-template-columns: 1fr 1fr; }
     .check { display: flex; align-items: center; gap: 6px; font-size: 13px; }
