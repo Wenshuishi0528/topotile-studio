@@ -6,6 +6,11 @@ Time zone: local macOS time. Some early entries are reconstructed from request o
 
 ## 2026-07-01
 
+### 16:43 - Public Release v0.36.6
+
+- Prepared `v0.36.6` as a public release after renaming the one-click launchers.
+- Bumped the app version from `v0.36.5` to `v0.36.6`.
+
 ### 16:38 - Launcher File Names
 
 - Renamed the macOS launcher to `A-Start-MacOS-TopoTile_Studio(macOS点这个启动).command`.
