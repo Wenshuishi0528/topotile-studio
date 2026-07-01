@@ -103,7 +103,7 @@ install.
 On macOS, you can double-click:
 
 ```text
-Open_OSM_DEM_3MF_Modeler.command
+A-Start-MacOS-TopoTile_Studio(macOS点这个启动).command
 ```
 
 If Python 3.11/3.12 is missing on macOS, the launcher can install Python 3.12
@@ -116,7 +116,7 @@ installing Homebrew. The Homebrew installer may ask for your Mac password.
 On Windows, you can double-click:
 
 ```text
-Open_TopoTile_Studio_Windows_Start.bat
+A-Start-Windows-TopoTile_Studio(Windows点这个启动).bat
 ```
 
 If Python 3.11/3.12 is missing on Windows, the launcher can install Python 3.12
@@ -149,7 +149,7 @@ python scripts/generate_sample.py
 On macOS, you can also double-click:
 
 ```text
-Open_Offline_Test_Model.command
+A-Test_Offline(离线测试).command
 ```
 
 Outputs go to:

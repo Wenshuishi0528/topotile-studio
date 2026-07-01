@@ -6,6 +6,13 @@ Time zone: local macOS time. Some early entries are reconstructed from request o
 
 ## 2026-07-01
 
+### 16:38 - Launcher File Names
+
+- Renamed the macOS launcher to `A-Start-MacOS-TopoTile_Studio(macOS点这个启动).command`.
+- Renamed the Windows launcher to `A-Start-Windows-TopoTile_Studio(Windows点这个启动).bat`.
+- Renamed the offline test launcher to `A-Test_Offline(离线测试).command`.
+- Updated README launcher references to match the new file names.
+
 ### 01:35 - Product Name and Intro
 
 - Set the bilingual product name to `TopoTile Studio / 3D地图工坊`.
