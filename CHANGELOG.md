@@ -1,10 +1,17 @@
 # Changelog
 
-All notable changes to TopoTile Studio are recorded here.
+All notable changes to TopoTile Studio / 3D地图工坊 are recorded here.
 
 Time zone: local macOS time. Some early entries are reconstructed from request order, screenshots, backup names, and file modification times.
 
 ## 2026-07-01
+
+### 01:35 - Product Name and Intro
+
+- Set the bilingual product name to `TopoTile Studio / 3D地图工坊`.
+- Updated the main intro to `把真实地图生成可 3D 打印的城市与地形模型。`
+- Updated the web header, README overview, local launchers, generated attribution, and app metadata to use the bilingual name.
+- Bumped the app version to `v0.36.5`.
 
 ### 01:23 - Dedication Easter Egg
 

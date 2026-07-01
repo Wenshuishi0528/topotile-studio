@@ -382,7 +382,7 @@ def _fetch_tile_recursive(
         )
     return {
         "version": 0.6,
-        "generator": "TopoTile Studio recursive tiled Overpass fetch",
+        "generator": "TopoTile Studio / 3D地图工坊 recursive tiled Overpass fetch",
         "elements": list(merged.values()),
     }
 
@@ -429,7 +429,7 @@ def fetch_osm_json_tiled(
         )
     return {
         "version": 0.6,
-        "generator": "TopoTile Studio tiled Overpass fetch",
+        "generator": "TopoTile Studio / 3D地图工坊 tiled Overpass fetch",
         "elements": elements,
         "tile_count": len(tiles),
         "tile_errors": errors,

@@ -114,7 +114,7 @@ install_python_macos() {
 }
 
 echo ""
-say2 "TopoTile Studio startup check" "TopoTile Studio 启动检查"
+say2 "TopoTile Studio / 3D Map Workshop startup check" "TopoTile Studio / 3D地图工坊 启动检查"
 echo ""
 say2 "Checking for compatible Python 3.11/3.12. (1/3)" "正在检查可用的 Python 3.11/3.12。（1/3）"
 
@@ -146,7 +146,7 @@ if ! venv_is_compatible; then
 fi
 
 echo ""
-say2 "Checking TopoTile Studio dependencies. (3/3)" "正在检查 TopoTile Studio 所需组件。（3/3）"
+say2 "Checking TopoTile Studio / 3D Map Workshop dependencies. (3/3)" "正在检查 TopoTile Studio / 3D地图工坊 所需组件。（3/3）"
 if ! ".venv/bin/python" - <<'PY' >/dev/null 2>&1
 import fastapi
 import uvicorn
@@ -162,18 +162,18 @@ import networkx
 import lxml
 PY
 then
-  say2 "Installing TopoTile Studio dependencies. This may take a few minutes. (3/3)" "正在安装 TopoTile Studio 所需组件，可能需要几分钟。（3/3）"
+  say2 "Installing TopoTile Studio / 3D Map Workshop dependencies. This may take a few minutes. (3/3)" "正在安装 TopoTile Studio / 3D地图工坊 所需组件，可能需要几分钟。（3/3）"
   ".venv/bin/python" -m pip install --upgrade pip
   ".venv/bin/python" -m pip install -r requirements.txt
 fi
 
 if lsof -nP -iTCP:${PORT} -sTCP:LISTEN >/dev/null 2>&1; then
-  say2 "TopoTile Studio is already running at ${URL}" "TopoTile Studio 已经在 ${URL} 运行。"
+  say2 "TopoTile Studio / 3D Map Workshop is already running at ${URL}" "TopoTile Studio / 3D地图工坊 已经在 ${URL} 运行。"
   open "$URL"
   exit 0
 fi
 
-say2 "Starting TopoTile Studio..." "正在启动 TopoTile Studio..."
+say2 "Starting TopoTile Studio / 3D Map Workshop..." "正在启动 TopoTile Studio / 3D地图工坊..."
 ".venv/bin/python" -m uvicorn app.main:app --host 127.0.0.1 --port "$PORT" &
 SERVER_PID=$!
 

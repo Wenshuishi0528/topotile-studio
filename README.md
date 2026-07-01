@@ -1,4 +1,8 @@
-# TopoTile Studio
+# TopoTile Studio / 3D地图工坊
+
+把真实地图生成可 3D 打印的城市与地形模型。
+
+Turn real maps into 3D-printable city and terrain models.
 
 <img width="2444" height="2108" alt="截屏2026-06-30 23 48 52" src="https://github.com/user-attachments/assets/b2975ad5-9beb-4719-9956-50dcbf902c56" />
 
@@ -10,19 +14,19 @@ research, and other non-commercial use only.
 
 **Author:** Made by Wenshuishi
 
-TopoTile Studio is not an OSI-approved open-source project. It is a
+TopoTile Studio / 3D地图工坊 is not an OSI-approved open-source project. It is a
 source-available non-commercial project. Commercial use, resale, paid hosting,
 or paid derivative products require separate written permission from the author.
 
-TopoTile Studio 目前是 Beta / Preview 版本。本项目源码公开，但仅限个人、学习、
+TopoTile Studio / 3D地图工坊 目前是 Beta / Preview 版本。本项目源码公开，但仅限个人、学习、
 研究和其它非商业用途使用。禁止商业使用、转售、付费部署或作为付费衍生产品提供；
 如需商业授权，请另行联系作者。
 
 ## Overview / 简介
 
-TopoTile Studio is a local web app that turns OpenStreetMap data and optional elevation data into 3D-printable city and terrain tiles. It is designed for practical desktop 3D printing workflows: select an area on the map, choose layers and road detail, generate a preview, then download slicer-friendly `.3mf`, `.glb`, `.stl`, or numbered chunk exports.
+TopoTile Studio / 3D地图工坊 is a local web app that turns OpenStreetMap data and optional elevation data into 3D-printable city and terrain models. It is designed for practical desktop 3D printing workflows: select an area on the map, choose layers and road detail, generate a preview, then download slicer-friendly `.3mf`, `.glb`, `.stl`, or numbered chunk exports.
 
-TopoTile Studio 是一个本地运行的网页工具，可以把 OpenStreetMap 地图数据和可选地形高程数据生成适合 3D 打印的城市/地形模型。它面向桌面 3D 打印流程设计：在地图上选择区域，调整建筑、道路、水体、绿地、停车场和地形选项，生成预览后下载适合切片软件使用的 `.3mf`、`.glb`、`.stl` 或分块编号文件。
+3D地图工坊是一个本地运行的网页工具，可以把 OpenStreetMap 地图数据和可选地形高程数据生成适合 3D 打印的城市/地形模型。它面向桌面 3D 打印流程设计：在地图上选择区域，调整建筑、道路、水体、绿地、停车场和地形选项，生成预览后下载适合切片软件使用的 `.3mf`、`.glb`、`.stl` 或分块编号文件。
 
 Key features / 主要功能：
 

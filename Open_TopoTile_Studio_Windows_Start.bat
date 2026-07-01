@@ -2,7 +2,7 @@
 setlocal EnableExtensions
 chcp 65001 >nul
 
-title TopoTile Studio Windows Start
+title TopoTile Studio - 3D地图工坊 Windows Start
 
 set "PORT=8000"
 set "URL=http://127.0.0.1:%PORT%/"
@@ -11,8 +11,8 @@ set "PYTHON_DOWNLOAD_URL=https://www.python.org/downloads/windows/"
 cd /d "%~dp0"
 
 echo.
-echo TopoTile Studio startup check
-echo TopoTile Studio 启动检查
+echo TopoTile Studio / 3D Map Workshop startup check
+echo TopoTile Studio / 3D地图工坊 启动检查
 echo.
 echo Checking for compatible Python 3.11/3.12. (1/3)
 echo 正在检查可用的 Python 3.11/3.12。（1/3）
@@ -42,12 +42,12 @@ call :EnsureVirtualEnvironment
 if errorlevel 1 exit /b 1
 
 echo.
-echo Checking TopoTile Studio dependencies. (3/3)
-echo 正在检查 TopoTile Studio 所需组件。（3/3）
+echo Checking TopoTile Studio / 3D Map Workshop dependencies. (3/3)
+echo 正在检查 TopoTile Studio / 3D地图工坊 所需组件。（3/3）
 ".venv\Scripts\python.exe" -c "import fastapi, uvicorn, multipart, requests, numpy, shapely, pyproj, trimesh, rasterio, scipy, networkx, lxml" >nul 2>nul
 if errorlevel 1 (
-  echo Installing TopoTile Studio dependencies. This may take a few minutes. (3/3)
-  echo 正在安装 TopoTile Studio 所需组件，可能需要几分钟。（3/3）
+  echo Installing TopoTile Studio / 3D Map Workshop dependencies. This may take a few minutes. (3/3)
+  echo 正在安装 TopoTile Studio / 3D地图工坊 所需组件，可能需要几分钟。（3/3）
   ".venv\Scripts\python.exe" -m pip install --upgrade pip
   if errorlevel 1 (
     echo Failed to upgrade pip.
@@ -66,14 +66,14 @@ if errorlevel 1 (
 
 netstat -ano | findstr /R /C:":%PORT% .*LISTENING" >nul 2>nul
 if not errorlevel 1 (
-  echo TopoTile Studio is already running at %URL%
-  echo TopoTile Studio 已经在 %URL% 运行。
+  echo TopoTile Studio / 3D Map Workshop is already running at %URL%
+  echo TopoTile Studio / 3D地图工坊 已经在 %URL% 运行。
   start "" "%URL%"
   exit /b 0
 )
 
-echo Starting TopoTile Studio...
-echo 正在启动 TopoTile Studio...
+echo Starting TopoTile Studio / 3D Map Workshop...
+echo 正在启动 TopoTile Studio / 3D地图工坊...
 start "TopoTile Studio Server" ".venv\Scripts\python.exe" -m uvicorn app.main:app --host 127.0.0.1 --port %PORT%
 
 for /l %%I in (1,1,80) do (

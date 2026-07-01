@@ -28,7 +28,7 @@ def _safe_name(name: str) -> str:
     return cleaned or "object"
 
 
-def make_model_xml(parts: list[MeshPart], title: str = "TopoTile Studio City Tile", creator: str = "TopoTile Studio") -> bytes:
+def make_model_xml(parts: list[MeshPart], title: str = "TopoTile Studio / 3D地图工坊 City Tile", creator: str = "TopoTile Studio / 3D地图工坊") -> bytes:
     model = ET.Element(f"{{{CORE_NS}}}model", {"unit": "millimeter", "xml:lang": "en-US"})
     ET.SubElement(model, f"{{{CORE_NS}}}metadata", {"name": "Title"}).text = title
     ET.SubElement(model, f"{{{CORE_NS}}}metadata", {"name": "Designer"}).text = creator
@@ -91,7 +91,7 @@ def make_content_types_xml() -> bytes:
     return ET.tostring(types, encoding="utf-8", xml_declaration=True)
 
 
-def write_3mf(parts: list[MeshPart], path: str | Path, title: str = "TopoTile Studio City Tile") -> Path:
+def write_3mf(parts: list[MeshPart], path: str | Path, title: str = "TopoTile Studio / 3D地图工坊 City Tile") -> Path:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     non_empty = [part.cleaned() for part in parts if not part.cleaned().is_empty()]

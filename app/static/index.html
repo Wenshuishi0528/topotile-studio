@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>TopoTile Studio</title>
+  <title>TopoTile Studio / 3D地图工坊</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
@@ -156,7 +156,7 @@
 </head>
 <body>
 <header>
-  <h1>TopoTile Studio <span class="app-version" id="appVersionLabel">v0.36.4</span></h1>
+  <h1>TopoTile Studio / 3D地图工坊 <span class="app-version" id="appVersionLabel">v0.36.5</span></h1>
   <div class="header-actions">
     <div class="author-name">Made by Wenshuishi</div>
     <div class="language-switch" aria-label="Language">
@@ -164,7 +164,7 @@
       <button type="button" data-lang-option="zh">中文</button>
     </div>
   </div>
-  <p>Local web app for generating Bambu A1-friendly 3MF city and terrain tiles.</p>
+  <p>Turn real maps into 3D-printable city and terrain models.</p>
 </header>
 <main>
   <section class="panel">
@@ -357,12 +357,12 @@
   </section>
 </main>
 <script>
-  const APP_VERSION = '0.36.4';
+  const APP_VERSION = '0.36.5';
   document.getElementById('appVersionLabel').textContent = `v${APP_VERSION}`;
 
   const LANGUAGE_STORAGE_KEY = 'topotile.language';
   const ZH_TEXT = {
-    'Local web app for generating Bambu A1-friendly 3MF city and terrain tiles.': '本地网页应用，用于生成适合 Bambu A1 打印的 3MF 城市与地形模型。',
+    'Turn real maps into 3D-printable city and terrain models.': '把真实地图生成可 3D 打印的城市与地形模型。',
     'Address search': '地址搜索',
     'Search': '搜索',
     'Search moves the current selection center to the result.': '搜索后会把当前选择框中心移动到结果位置。',
@@ -1618,7 +1618,7 @@
   function saveProject() {
     const name = (document.getElementById('output_name').value || 'topotile').trim().replace(/\s+/g, '_');
     const payload = {
-      app: 'TopoTile Studio',
+      app: 'TopoTile Studio / 3D地图工坊',
       app_version: APP_VERSION,
       version: 2,
       saved_at: new Date().toISOString(),

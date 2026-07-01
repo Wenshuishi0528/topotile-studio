@@ -40,7 +40,7 @@ ACTIVE_JOBS_LOCK = Lock()
 JOB_FUTURES: dict[str, Future] = {}
 JOB_FUTURES_LOCK = Lock()
 
-app = FastAPI(title="TopoTile Studio")
+app = FastAPI(title="TopoTile Studio / 3D地图工坊")
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 

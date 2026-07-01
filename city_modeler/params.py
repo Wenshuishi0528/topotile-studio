@@ -132,7 +132,7 @@ class ModelParams:
     osm_overpass_url: str = "https://overpass-api.de/api/interpreter"
     road_levels: list[str] = field(default_factory=lambda: list(DEFAULT_ROAD_LEVELS))
     dem_attribution: str = ""
-    project_name: str = "TopoTile Studio City Tile"
+    project_name: str = "TopoTile Studio / 3D地图工坊 City Tile"
     output_name: str = "city_model"
     area_infill_mode: str = "empty_areas"
     route_name: str = ""
