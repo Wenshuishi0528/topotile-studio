@@ -6,6 +6,13 @@ Time zone: local macOS time. Some early entries are reconstructed from request o
 
 ## 2026-07-01
 
+### 00:18 - Middle-Mouse Preview Pan
+
+- Added middle-mouse drag panning in the 3D preview so the model can be moved up, down, left, and right within the preview pane without changing exported geometry.
+- Kept left-button orbit rotation and mouse-wheel zoom behavior intact.
+- Temporarily pauses auto-rotate while panning, then restores it if the auto-rotate switch remains enabled.
+- Bumped the app version to `v0.36.0`.
+
 ### 00:01 - Beginner-Friendly Python Runtime Launchers
 
 - Updated the macOS launcher to detect Python 3.11/3.12 specifically instead of any Python 3 version.
