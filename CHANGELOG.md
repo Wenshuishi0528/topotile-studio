@@ -6,6 +6,12 @@ Time zone: local macOS time. Some early entries are reconstructed from request o
 
 ## 2026-07-01
 
+### 17:40 - Public Release v0.36.7
+
+- Prepared `v0.36.7` as a Windows launcher archive fix.
+- Added `.gitattributes` so generated release archives preserve Windows `.bat` launchers with CRLF line endings.
+- Bumped the app version from `v0.36.6` to `v0.36.7`.
+
 ### 16:43 - Public Release v0.36.6
 
 - Prepared `v0.36.6` as a public release after renaming the one-click launchers.

@@ -5,11 +5,11 @@ Last updated: 2026-06-30-2149
 ## Current State
 
 - Project name: TopoTile Studio
-- Current app version: `v0.35.0`
+- Current app version: `v0.36.7`
 - Local project path: `/Users/apple/Downloads/osm_dem_3mf_modeler`
 - GitHub remote: `https://github.com/Wenshuishi0528/topotile-studio.git`
 - Current branch: `main`
-- Latest pushed commit at handoff: `fc5d321` (`Backup TopoTile Studio v0.33.0`)
+- Latest pushed commit at handoff: pending `v0.36.7` Windows launcher archive fix
 - Latest GitHub backup tag: `backup-20260630-184250`
 - Latest local backup: `/Users/apple/Documents/Codex/2026-06-30/topotile_studio_backup_20260630-184250`
 - Local web URL: `http://127.0.0.1:8000/`
@@ -214,9 +214,9 @@ Regression risks the user has already encountered:
 
 ## Versioning Guidance
 
-Current version is `v0.35.0`.
+Current version is `v0.36.7`.
 
-The user counted 29 recorded iterations before adding terrain-fitted building bases. Terrain-fitted building bases became `v0.30.0`; GPX/KML raised routes became `v0.31.0`; the built-in offline sample became `v0.32.0`; generic sample labeling and author credit became `v0.32.1`; the English/Chinese UI toggle became `v0.33.0`; cancellable generation jobs became `v0.34.0`; broad-parent area-infill suppression and automatic large-water-boundary recovery became `v0.35.0`.
+The user counted 29 recorded iterations before adding terrain-fitted building bases. Terrain-fitted building bases became `v0.30.0`; GPX/KML raised routes became `v0.31.0`; the built-in offline sample became `v0.32.0`; generic sample labeling and author credit became `v0.32.1`; the English/Chinese UI toggle became `v0.33.0`; cancellable generation jobs became `v0.34.0`; broad-parent area-infill suppression and automatic large-water-boundary recovery became `v0.35.0`; one-click launcher renaming became `v0.36.6`; the Windows launcher release archive line-ending fix became `v0.36.7`.
 
 Suggested rule:
 
