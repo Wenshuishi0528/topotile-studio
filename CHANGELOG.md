@@ -6,6 +6,13 @@ Time zone: local macOS time. Some early entries are reconstructed from request o
 
 ## 2026-07-01
 
+### 18:07 - Selection Radius Input
+
+- Added a `Center-to-edge radius, km` control below the north/east coordinate inputs.
+- The radius control resizes fixed-ratio, circle, and hex selections around the current center.
+- Kept Free selection mode as manual drag-only so it does not conflict with arbitrary rectangle editing.
+- Kept the visible app version at `v0.36.7`.
+
 ### 17:40 - Public Release v0.36.7
 
 - Prepared `v0.36.7` as a Windows launcher archive fix.

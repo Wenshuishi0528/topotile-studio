@@ -48,6 +48,7 @@
     .viewer-resizer:hover,
     .viewer-resizer.dragging { background: linear-gradient(#eff6ff, #dbeafe); }
     .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .row .wide { grid-column: 1 / -1; }
     label { display: block; font-size: 12px; margin: 12px 0 4px; font-weight: 700; color: #344054; }
     input, textarea, select { box-sizing: border-box; width: 100%; border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 13px; }
     textarea { min-height: 58px; resize: vertical; }
@@ -206,6 +207,10 @@
       <div><label>North</label><input id="north" type="number" step="0.000001" value="47.6260"></div>
       <div><label>East</label><input id="east" type="number" step="0.000001" value="-122.3455"></div>
     </div>
+    <div class="row">
+      <div class="wide"><label>Center-to-edge radius, km</label><input id="selection_radius_km" type="number" min="0.001" step="0.1" placeholder="Example: 5"></div>
+    </div>
+    <div class="small" id="selectionRadiusHelp">Radius resizes fixed-ratio, circle, and hex selections from the current center. Free mode keeps manual dragging.</div>
 
     <div class="row">
       <div><label>Max XY size, mm</label><input id="max_size_mm" type="number" value="180" min="20" max="240"></div>
@@ -384,6 +389,12 @@
     'West': '西',
     'North': '北',
     'East': '东',
+    'Center-to-edge radius, km': '中心到边距离，km',
+    'Example: 5': '例如：5',
+    'Radius resizes fixed-ratio, circle, and hex selections from the current center. Free mode keeps manual dragging.': '半径会从当前中心调整固定比例、圆形和六边形选择框。自由模式保持手动拖拽。',
+    'Radius is disabled in Free mode; switch to a fixed ratio, circle, or hex selection to apply it.': '自由模式下半径输入不可用；请切换到固定比例、圆形或六边形后使用。',
+    'For 5:7 and 7:5, radius controls the shorter center-to-edge distance.': '对于 5:7 和 7:5，半径控制较短方向的中心到边距离。',
+    'Radius must be greater than 0.': '半径必须大于 0。',
     'Max XY size, mm': '最大 XY 尺寸，mm',
     'Base thickness, mm': '底板厚度，mm',
     'Vertical exaggeration': '垂直夸张倍数',
@@ -689,6 +700,7 @@
     translateTextNodes();
     translateAttributes();
     if (typeof updateBBoxInfo === 'function') updateBBoxInfo(normalizeBBox(readBBox()));
+    if (typeof updateSelectionRadiusControl === 'function') updateSelectionRadiusControl(normalizeBBox(readBBox()));
     if (typeof updateRoadCleaningStatus === 'function') updateRoadCleaningStatus();
     if (typeof updateTerrainModeStatus === 'function') updateTerrainModeStatus();
     if (typeof updateRouteStatus === 'function') updateRouteStatus();
@@ -804,6 +816,79 @@
     return null;
   }
 
+  function selectionRadiusEnabled(mode = selectionMode()) {
+    return mode !== 'free';
+  }
+
+  function selectionRadiusHelpText(mode = selectionMode()) {
+    if (!selectionRadiusEnabled(mode)) {
+      return tr('Radius is disabled in Free mode; switch to a fixed ratio, circle, or hex selection to apply it.');
+    }
+    if (mode === '5x7' || mode === '7x5') {
+      return tr('For 5:7 and 7:5, radius controls the shorter center-to-edge distance.');
+    }
+    return tr('Radius resizes fixed-ratio, circle, and hex selections from the current center. Free mode keeps manual dragging.');
+  }
+
+  function formatRadiusKm(value) {
+    if (!Number.isFinite(value) || value <= 0) return '';
+    if (value >= 10) return value.toFixed(1).replace(/\.0$/, '');
+    return value.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+  }
+
+  function selectionRadiusKmFromBox(box, mode = selectionMode()) {
+    const info = estimateBBox(normalizeBBox(box));
+    if (!Number.isFinite(info.widthM) || !Number.isFinite(info.heightM) || info.widthM <= 0 || info.heightM <= 0) return NaN;
+    if (mode === 'hexagon') {
+      return Math.min(info.widthM / 2, info.heightM * Math.sqrt(3) / 4) / 1000;
+    }
+    return Math.min(info.widthM, info.heightM) / 2 / 1000;
+  }
+
+  function selectionDimensionsForRadius(mode, radiusKm) {
+    const radiusM = Math.max(1, radiusKm * 1000);
+    if (mode === 'hexagon') {
+      return {widthM: radiusM * 2, heightM: radiusM * 4 / Math.sqrt(3)};
+    }
+    const ratio = aspectForMode(mode);
+    if (ratio && ratio < 1) return {widthM: radiusM * 2, heightM: radiusM * 2 / ratio};
+    if (ratio && ratio > 1) return {widthM: radiusM * 2 * ratio, heightM: radiusM * 2};
+    return {widthM: radiusM * 2, heightM: radiusM * 2};
+  }
+
+  function updateSelectionRadiusControl(box = normalizeBBox(readBBox())) {
+    const input = document.getElementById('selection_radius_km');
+    const help = document.getElementById('selectionRadiusHelp');
+    if (!input || !help) return;
+    const mode = selectionMode();
+    input.disabled = !selectionRadiusEnabled(mode);
+    help.textContent = selectionRadiusHelpText(mode);
+    if (document.activeElement !== input) {
+      input.value = formatRadiusKm(selectionRadiusKmFromBox(box, mode));
+    }
+  }
+
+  function applySelectionRadiusFromInput() {
+    const input = document.getElementById('selection_radius_km');
+    const help = document.getElementById('selectionRadiusHelp');
+    if (!input) return;
+    const mode = selectionMode();
+    if (!selectionRadiusEnabled(mode)) {
+      updateSelectionRadiusControl();
+      return;
+    }
+    const radiusKm = parseFloat(input.value);
+    if (!Number.isFinite(radiusKm) || radiusKm <= 0) {
+      if (help) help.textContent = tr('Radius must be greater than 0.');
+      return;
+    }
+    const center = currentSelectionBounds().getCenter();
+    const dimensions = selectionDimensionsForRadius(mode, radiusKm);
+    writeBBox(boxFromCenterMeters(center, dimensions.widthM, dimensions.heightM));
+    drawRect();
+    map.fitBounds(currentSelectionBounds(), {padding: [24, 24]});
+  }
+
   function metersPerDegree(lat) {
     return {
       latM: 111320,
@@ -852,6 +937,7 @@
     document.getElementById('north').value = b.north.toFixed(6);
     document.getElementById('east').value = b.east.toFixed(6);
     updateBBoxInfo(b);
+    updateSelectionRadiusControl(b);
   }
 
   function moveSelectionTo(lat, lng) {
@@ -1216,6 +1302,12 @@
   });
   ['south','west','north','east'].forEach(id => document.getElementById(id).addEventListener('change', drawRect));
   document.querySelectorAll('input[name="selection_mode"]').forEach(input => input.addEventListener('change', drawRect));
+  document.getElementById('selection_radius_km').addEventListener('change', applySelectionRadiusFromInput);
+  document.getElementById('selection_radius_km').addEventListener('keydown', event => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    applySelectionRadiusFromInput();
+  });
   drawRect();
 
   async function searchAddress() {
