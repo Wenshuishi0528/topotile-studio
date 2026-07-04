@@ -138,8 +138,48 @@ def test_generate_with_saved_route_segments(tmp_path: Path):
     summary = generate_model(params, tmp_path, osm_json_override=osm_json)
 
     assert summary["route"]["enabled"] is True
+    assert summary["route"]["routes"] == 1
     assert summary["route"]["points"] == 3
     assert summary["route"]["clipped_segments"] >= 1
+    assert "route" in {part["name"] for part in summary["mesh_parts"]}
+    validate_3mf(tmp_path / "city_model.3mf")
+
+
+def test_generate_with_multiple_saved_routes(tmp_path: Path):
+    params = ModelParams(
+        south=47.6200,
+        west=-122.3550,
+        north=47.6260,
+        east=-122.3455,
+        max_size_mm=160,
+        terrain_grid_size=18,
+        include_route=True,
+        routes=[
+            {
+                "name": "walk.gpx",
+                "segments": [[[47.6210, -122.3530], [47.6225, -122.3510]]],
+                "width_mm": 0.8,
+                "height_mm": 0.5,
+                "offset_mm": 0.1,
+            },
+            {
+                "name": "ride.kml",
+                "segments": [[[47.6230, -122.3505], [47.6240, -122.3490], [47.6250, -122.3478]]],
+                "width_mm": 1.4,
+                "height_mm": 0.9,
+                "offset_mm": 0.2,
+            },
+        ],
+    )
+    osm_json = make_synthetic_osm_json(params.south, params.west, params.north, params.east)
+
+    summary = generate_model(params, tmp_path, osm_json_override=osm_json)
+
+    assert summary["route"]["enabled"] is True
+    assert summary["route"]["routes"] == 2
+    assert summary["route"]["points"] == 5
+    assert len(summary["routes"]) == 2
+    assert summary["routes"][1]["name"] == "ride.kml"
     assert "route" in {part["name"] for part in summary["mesh_parts"]}
     validate_3mf(tmp_path / "city_model.3mf")
 

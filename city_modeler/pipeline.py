@@ -40,7 +40,7 @@ from .osm import (
     OSMFeature,
 )
 from .overture import OvertureBuildingResult, supplement_overture_buildings
-from .params import ModelParams, safe_output_stem
+from .params import ModelParams, normalize_route_configs, safe_output_stem
 from .printability import printability_report
 from .routes import route_point_count, route_segments_to_local_lines
 
@@ -418,7 +418,26 @@ def generate_model(
     rail_stations = [f for f in features if f.layer == "rail_station"]
     subway_lines = [f for f in features if f.layer == "subway_line"]
     subway_stations = [f for f in features if f.layer == "subway_station"]
-    route_lines = route_segments_to_local_lines(params.route_segments, projection, clip_m) if params.include_route else []
+    route_configs = params.routes
+    if params.include_route and not route_configs:
+        route_configs = normalize_route_configs(
+            [],
+            fallback_name=params.route_name,
+            fallback_segments=params.route_segments,
+            fallback_width=params.route_width_mm,
+            fallback_height=params.route_height_mm,
+            fallback_offset=params.route_offset_mm,
+        )
+    route_layers: list[dict[str, Any]] = []
+    if params.include_route:
+        for route in route_configs:
+            route_layers.append({
+                "config": route,
+                "lines": route_segments_to_local_lines(route["segments"], projection, clip_m),
+            })
+    route_point_total = sum(route_point_count(route["segments"]) for route in route_configs) if params.include_route else 0
+    route_segment_total = sum(len(route["segments"]) for route in route_configs) if params.include_route else 0
+    route_clipped_total = sum(len(route["lines"]) for route in route_layers)
 
     water_cutouts = water_cutout_polygons_mm(water, scaler, params) if params.cut_out_water else []
     terrain_part = terrain_to_mesh(terrain, cutouts_mm=water_cutouts, footprint_mm=footprint_mm)
@@ -450,12 +469,23 @@ def generate_model(
         subway_station_features=subway_stations,
     ))
     if params.include_route:
-        _progress(progress, f"Building route track layer from {route_point_count(params.route_segments)} points", 0.76)
+        _progress(progress, f"Building route track layer from {route_point_total} points", 0.76)
         check_cancel(cancel_check)
         route_water_union = water_union_geometry_m(water, scaler, params) if params.cut_out_water else None
-        route_part = build_route_meshes(route_lines, scaler, terrain, params, route_water_union)
-        if not route_part.is_empty():
-            parts.append(route_part)
+        for route_layer in route_layers:
+            route_config = route_layer["config"]
+            route_part = build_route_meshes(
+                route_layer["lines"],
+                scaler,
+                terrain,
+                params,
+                route_water_union,
+                width_mm=float(route_config["width_mm"]),
+                height_mm=float(route_config["height_mm"]),
+                offset_mm=float(route_config["offset_mm"]),
+            )
+            if not route_part.is_empty():
+                parts.append(route_part)
     check_cancel(cancel_check)
     parts = [p.cleaned() for p in parts if not p.cleaned().is_empty()]
 
@@ -531,17 +561,30 @@ def generate_model(
             "rail_stations": len(rail_stations),
             "subway_lines": len(subway_lines),
             "subway_stations": len(subway_stations),
-            "route_points": route_point_count(params.route_segments) if params.include_route else 0,
+            "route_points": route_point_total,
         },
         "route": {
             "enabled": params.include_route,
             "name": params.route_name,
-            "segments": len(params.route_segments) if params.include_route else 0,
-            "points": route_point_count(params.route_segments) if params.include_route else 0,
-            "clipped_segments": len(route_lines),
+            "routes": len(route_configs) if params.include_route else 0,
+            "segments": route_segment_total,
+            "points": route_point_total,
+            "clipped_segments": route_clipped_total,
             "width_mm": params.route_width_mm,
             "height_mm": params.route_height_mm,
         },
+        "routes": [
+            {
+                "name": str(route_layer["config"]["name"]),
+                "segments": len(route_layer["config"]["segments"]),
+                "points": route_point_count(route_layer["config"]["segments"]),
+                "clipped_segments": len(route_layer["lines"]),
+                "width_mm": float(route_layer["config"]["width_mm"]),
+                "height_mm": float(route_layer["config"]["height_mm"]),
+                "offset_mm": float(route_layer["config"]["offset_mm"]),
+            }
+            for route_layer in route_layers
+        ],
         "selected_road_levels": params.road_levels,
         "mesh_parts": [
             {"name": p.name, "vertices": int(len(p.vertices)), "triangles": int(len(p.faces))}
@@ -736,7 +779,8 @@ def generate_sample(output_dir: str | Path, cancel_check: CancelCheck | None = N
             "route_points": 0,
             "bundled_sample_objects": len(parts),
         },
-        "route": {"enabled": False, "name": "", "segments": 0, "points": 0, "clipped_segments": 0},
+        "route": {"enabled": False, "name": "", "routes": 0, "segments": 0, "points": 0, "clipped_segments": 0},
+        "routes": [],
         "selected_road_levels": params.road_levels,
         "mesh_parts": [
             {"name": p.name, "vertices": int(len(p.vertices)), "triangles": int(len(p.faces))}

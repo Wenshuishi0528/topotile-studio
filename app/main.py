@@ -352,8 +352,18 @@ async def create_job(
         except UnicodeDecodeError as exc:
             raise HTTPException(status_code=400, detail="Route upload must be UTF-8 encoded GPX/KML XML") from exc
         try:
-            params_data["route_segments"] = parse_route_text(route_text, route_file.filename)
-            params_data["route_name"] = Path(route_file.filename).name
+            route_segments = parse_route_text(route_text, route_file.filename)
+            route_name = Path(route_file.filename).name
+            params_data["route_segments"] = route_segments
+            params_data["route_name"] = route_name
+            if not params_data.get("routes"):
+                params_data["routes"] = [{
+                    "name": route_name,
+                    "segments": route_segments,
+                    "width_mm": params_data.get("route_width_mm", 1.20),
+                    "height_mm": params_data.get("route_height_mm", 0.80),
+                    "offset_mm": params_data.get("route_offset_mm", 0.15),
+                }]
         except Exception as exc:
             raise HTTPException(status_code=400, detail=f"Invalid route file: {exc}") from exc
 

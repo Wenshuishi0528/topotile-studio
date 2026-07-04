@@ -176,6 +176,13 @@ def test_create_job_parses_uploaded_route_file(tmp_path, monkeypatch):
     assert captured["dem_path"] is None
     assert captured["params_data"]["route_name"] == "walk.gpx"
     assert captured["params_data"]["route_segments"] == [[[47.62, -122.35], [47.621, -122.349]]]
+    assert captured["params_data"]["routes"] == [{
+        "name": "walk.gpx",
+        "segments": [[[47.62, -122.35], [47.621, -122.349]]],
+        "width_mm": 1.2,
+        "height_mm": 0.8,
+        "offset_mm": 0.15,
+    }]
     assert (jobs / captured["job_id"] / "route.gpx").exists()
 
 

@@ -1947,11 +1947,15 @@ def build_route_meshes(
     terrain: TerrainGrid,
     params: ModelParams,
     water_union_m: BaseGeometry | None = None,
+    *,
+    width_mm: float | None = None,
+    height_mm: float | None = None,
+    offset_mm: float | None = None,
 ) -> MeshPart:
     parts: list[MeshPart] = []
-    width_mm = params.route_width_mm
-    thickness_mm = params.route_height_mm
-    z_offset_mm = params.route_offset_mm
+    width_mm = params.route_width_mm if width_mm is None else width_mm
+    thickness_mm = params.route_height_mm if height_mm is None else height_mm
+    z_offset_mm = params.route_offset_mm if offset_mm is None else offset_mm
     for line_m in route_lines_m:
         coords_m = list(line_m.coords)
         if len(coords_m) < 2:

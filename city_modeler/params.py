@@ -72,6 +72,87 @@ def normalize_route_segments(value: object, max_points: int = 60000) -> list[lis
     return segments
 
 
+def _route_float(value: object, default: float, min_value: float, max_value: float) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return default
+    return min(max(parsed, min_value), max_value)
+
+
+def _route_name(value: object, default: str) -> str:
+    name = str(value or "").strip()
+    name = " ".join(name.split())
+    return (name[:80] or default)
+
+
+def normalize_route_configs(
+    value: object,
+    *,
+    fallback_name: str = "",
+    fallback_segments: object | None = None,
+    fallback_width: float = 1.20,
+    fallback_height: float = 0.80,
+    fallback_offset: float = 0.15,
+    max_routes: int = 12,
+    max_points: int = 60000,
+) -> list[dict[str, Any]]:
+    raw_routes = value if isinstance(value, list) else []
+    if not raw_routes and fallback_segments:
+        raw_routes = [{
+            "name": fallback_name,
+            "segments": fallback_segments,
+            "width_mm": fallback_width,
+            "height_mm": fallback_height,
+            "offset_mm": fallback_offset,
+        }]
+
+    routes: list[dict[str, Any]] = []
+    point_count = 0
+    for idx, raw_route in enumerate(raw_routes[:max_routes]):
+        if not isinstance(raw_route, dict):
+            continue
+        remaining_points = max(max_points - point_count, 0)
+        if remaining_points <= 0:
+            break
+        segments = normalize_route_segments(
+            raw_route.get("segments", raw_route.get("route_segments", [])),
+            max_points=remaining_points,
+        )
+        if not segments:
+            continue
+        point_count += sum(len(segment) for segment in segments)
+        name = _route_name(
+            raw_route.get("name", raw_route.get("route_name", raw_route.get("filename", ""))),
+            f"Route #{idx + 1}",
+        )
+        routes.append({
+            "name": name,
+            "segments": segments,
+            "width_mm": _route_float(
+                raw_route.get("width_mm", raw_route.get("route_width_mm", fallback_width)),
+                fallback_width,
+                0.15,
+                20.0,
+            ),
+            "height_mm": _route_float(
+                raw_route.get("height_mm", raw_route.get("route_height_mm", fallback_height)),
+                fallback_height,
+                0.05,
+                20.0,
+            ),
+            "offset_mm": _route_float(
+                raw_route.get("offset_mm", raw_route.get("route_offset_mm", fallback_offset)),
+                fallback_offset,
+                0.0,
+                30.0,
+            ),
+        })
+        if point_count >= max_points:
+            break
+    return routes
+
+
 def safe_output_stem(value: object, default: str = "city_model") -> str:
     stem = str(value or "").strip()
     for suffix in (".3mf", ".glb", ".stl", ".zip"):
@@ -144,6 +225,7 @@ class ModelParams:
     model_detail_mode: str = "normal"
     route_name: str = ""
     route_segments: list[list[list[float]]] = field(default_factory=list)
+    routes: list[dict[str, Any]] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ModelParams":
@@ -209,6 +291,13 @@ class ModelParams:
             filtered["road_levels"] = [level for level in levels if level in supported]
         if "route_segments" in filtered:
             filtered["route_segments"] = normalize_route_segments(filtered["route_segments"])
+        if "routes" in filtered:
+            filtered["routes"] = normalize_route_configs(
+                filtered["routes"],
+                fallback_width=float(filtered.get("route_width_mm", 1.20)),
+                fallback_height=float(filtered.get("route_height_mm", 0.80)),
+                fallback_offset=float(filtered.get("route_offset_mm", 0.15)),
+            )
 
         obj = cls(**filtered)
         obj.validate()
@@ -262,7 +351,22 @@ class ModelParams:
         if unsupported:
             raise ValueError(f"Unsupported road level(s): {', '.join(unsupported)}")
         self.route_segments = normalize_route_segments(self.route_segments)
-        if self.include_route and not self.route_segments:
+        self.routes = normalize_route_configs(
+            self.routes,
+            fallback_name=self.route_name,
+            fallback_segments=self.route_segments,
+            fallback_width=self.route_width_mm,
+            fallback_height=self.route_height_mm,
+            fallback_offset=self.route_offset_mm,
+        )
+        if self.routes:
+            first_route = self.routes[0]
+            self.route_name = str(first_route["name"])
+            self.route_segments = first_route["segments"]
+            self.route_width_mm = float(first_route["width_mm"])
+            self.route_height_mm = float(first_route["height_mm"])
+            self.route_offset_mm = float(first_route["offset_mm"])
+        if self.include_route and not self.routes:
             raise ValueError("include_route requires an uploaded GPX/KML route or saved route points.")
 
     @property

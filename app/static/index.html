@@ -69,6 +69,25 @@
     .segmented span { display: block; text-align: center; border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 6px; font-size: 12px; font-weight: 800; color: #334155; background: #f8fafc; cursor: pointer; }
     .segmented input:checked + span { border-color: #2563eb; background: #dbeafe; color: #1d4ed8; }
     .small { font-size: 12px; color: #64748b; margin-top: 6px; line-height: 1.45; }
+    .hidden { display: none !important; }
+    .conditional-section {
+      margin-top: 8px;
+      padding: 10px;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      background: #f8fafc;
+    }
+    .route-list { display: grid; gap: 10px; margin-top: 8px; }
+    .route-card {
+      padding: 10px;
+      border: 1px solid #d9e2ec;
+      border-radius: 8px;
+      background: white;
+    }
+    .route-card-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+    .route-card-title { margin: 0; font-size: 13px; font-weight: 800; color: #344054; }
+    .route-card-actions { display: flex; gap: 6px; }
+    .route-card-actions button { width: auto; margin: 0; padding: 5px 8px; font-size: 12px; }
     .status { margin-top: 14px; padding: 12px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; font-size: 13px; white-space: pre-wrap; }
     .status.failed { background: #fff7ed; border-color: #fed7aa; color: #9a3412; }
     .status.cancelled { background: #f8fafc; border-color: #cbd5e1; color: #475569; }
@@ -158,7 +177,7 @@
 </head>
 <body>
 <header>
-  <h1>TopoTile Studio / 3D地图工坊 <span class="app-version" id="appVersionLabel">v0.57</span></h1>
+  <h1>TopoTile Studio / 3D地图工坊 <span class="app-version" id="appVersionLabel">v0.59</span></h1>
   <div class="header-actions">
     <div class="author-name">Made by Wenshuishi</div>
     <div class="language-switch" aria-label="Language">
@@ -239,12 +258,14 @@
       <label class="check"><input id="auto_terrain" type="checkbox"> Auto terrain relief</label>
     </div>
     <div class="small">Large map mode chunks OSM data for bigger selections. Auto terrain relief controls whether the base is flat or height-varying. Uploaded DEM files override automatic terrain.</div>
-    <div class="row">
-      <div><label>Max terrain height, mm</label><input id="max_terrain_height_mm" type="number" value="35" min="1" max="120" step="1"></div>
-      <div><label>Terrain tile zoom</label><input id="terrain_tile_zoom" type="number" value="13" min="8" max="14"></div>
-      <div><label>OSM tile size, km</label><input id="osm_tile_size_km" type="number" value="2" min="0.5" max="20" step="0.5"></div>
+    <div class="conditional-section hidden" id="terrainAdvanced">
+      <div class="row">
+        <div><label>Max terrain height, mm</label><input id="max_terrain_height_mm" type="number" value="35" min="1" max="120" step="1"></div>
+        <div><label>Terrain tile zoom</label><input id="terrain_tile_zoom" type="number" value="13" min="8" max="14"></div>
+        <div><label>OSM tile size, km</label><input id="osm_tile_size_km" type="number" value="2" min="0.5" max="20" step="0.5"></div>
+      </div>
+      <div class="small" id="terrainModeStatus">Flat base: terrain relief controls are ignored unless Auto terrain relief is on or a DEM is uploaded.</div>
     </div>
-    <div class="small" id="terrainModeStatus">Flat base: terrain relief controls are ignored unless Auto terrain relief is on or a DEM is uploaded.</div>
 
     <label>Layers</label>
     <div class="checks">
@@ -259,18 +280,19 @@
       <label class="check"><input id="include_rail_stations" type="checkbox"> Rail stations</label>
       <label class="check"><input id="include_subway_stations" type="checkbox"> Subway stations</label>
     </div>
-    <div class="row">
-      <div><label>Area infill height, mm</label><input id="area_infill_height_mm" type="number" value="0.60" min="0.05" max="10" step="0.05"></div>
-      <div>
-        <label>Area infill mode</label>
-        <select id="area_infill_mode">
-          <option value="empty_areas" selected>No-building areas</option>
-          <option value="all_areas">All area polygons</option>
-        </select>
+    <div class="conditional-section" id="areaInfillAdvanced">
+      <div class="row">
+        <div><label>Area infill height, mm</label><input id="area_infill_height_mm" type="number" value="0.60" min="0.05" max="10" step="0.05"></div>
+        <div>
+          <label>Area infill mode</label>
+          <select id="area_infill_mode">
+            <option value="empty_areas" selected>No-building areas</option>
+            <option value="all_areas">All area polygons</option>
+          </select>
+        </div>
       </div>
     </div>
     <div class="small">Airport includes runways, taxiways, and aprons as a low layer with parking-lot thickness.</div>
-    <div class="small">Rail and subway station layers are off by default. Rail and subway line switches are under Road Levels.</div>
     <div class="small">Cut out water removes lakes and ocean from the base so you can place colored material underneath.</div>
 
     <label>Road cleanup strength</label>
@@ -303,17 +325,15 @@
     <div class="checks">
       <label class="check"><input id="include_route" type="checkbox"> Raised route line</label>
     </div>
-    <input id="route_file" type="file" accept=".gpx,.kml,application/gpx+xml,application/vnd.google-earth.kml+xml" />
-    <div class="row">
-      <div><label>Route width, mm</label><input id="route_width_mm" type="number" value="1.20" min="0.15" max="20" step="0.05"></div>
-      <div><label>Route height, mm</label><input id="route_height_mm" type="number" value="0.80" min="0.05" max="20" step="0.05"></div>
-      <div><label>Route offset, mm</label><input id="route_offset_mm" type="number" value="0.15" min="0" max="30" step="0.05"></div>
+    <div class="conditional-section hidden" id="routeAdvanced">
+      <div class="route-list" id="routeList"></div>
+      <button class="secondary" id="addRoute" type="button">Add route</button>
+      <div class="button-row">
+        <button class="secondary" id="fitRoute" type="button">Fit all routes</button>
+        <button class="secondary" id="clearRoute" type="button">Clear all routes</button>
+      </div>
+      <div class="small" id="routeStatus">Upload a GPX or KML track to print it as a raised line over the model.</div>
     </div>
-    <div class="button-row">
-      <button class="secondary" id="fitRoute" type="button">Fit route</button>
-      <button class="secondary" id="clearRoute" type="button">Clear route</button>
-    </div>
-    <div class="small" id="routeStatus">Upload a GPX or KML track to print it as a raised line over the model.</div>
 
     <label>Optional DEM GeoTIFF</label>
     <input id="dem_file" type="file" accept=".tif,.tiff" />
@@ -326,11 +346,13 @@
     <div class="checks">
       <label class="check"><input id="chunk_export" type="checkbox"> Export numbered chunks</label>
     </div>
-    <div class="row">
-      <div><label>Chunk rows</label><input id="chunk_rows" type="number" value="2" min="1" max="6"></div>
-      <div><label>Chunk columns</label><input id="chunk_cols" type="number" value="2" min="1" max="6"></div>
+    <div class="conditional-section hidden" id="chunkAdvanced">
+      <div class="row">
+        <div><label>Chunk rows</label><input id="chunk_rows" type="number" value="2" min="1" max="6"></div>
+        <div><label>Chunk columns</label><input id="chunk_cols" type="number" value="2" min="1" max="6"></div>
+      </div>
+      <div class="small">Numbering starts at the southwest corner: r01_c01, then east by column and north by row.</div>
     </div>
-    <div class="small">Numbering starts at the southwest corner: r01_c01, then east by column and north by row.</div>
 
     <label>Export options</label>
     <div class="checks">
@@ -380,7 +402,7 @@
   </section>
 </main>
 <script>
-  const APP_VERSION = '0.57';
+  const APP_VERSION = '0.59';
   document.getElementById('appVersionLabel').textContent = `v${APP_VERSION}`;
 
   const LANGUAGE_STORAGE_KEY = 'topotile.language';
@@ -454,7 +476,6 @@
     'No-building areas': '无建筑区域',
     'All area polygons': '全部区域面',
     'Airport includes runways, taxiways, and aprons as a low layer with parking-lot thickness.': '机场包含跑道、滑行道和停机坪，会按停车场类似的低矮图层生成。',
-    'Rail and subway station layers are off by default. Rail and subway line switches are under Road Levels.': '铁路站和地铁站图层默认关闭。铁路线和地铁线开关在道路级别里。',
     'Cut out water removes lakes and ocean from the base so you can place colored material underneath.': '水体镂空会从底板中移除湖泊和海洋，便于在下方放置彩色材料。',
     'Road cleanup strength': '道路清理强度',
     'Balanced: keeps normal streets plus pedestrian/footway.': '平衡：保留普通街道以及 pedestrian/footway。',
@@ -477,12 +498,21 @@
     'Leave small footpaths/service roads off for a cleaner printable street grid. Rail and subway lines are optional and off by default.': '关闭较小的步道/服务道路，可以得到更干净、更适合打印的街道网格。铁路线和地铁线是可选项，默认关闭。',
     'Route / Track': '路线 / 轨迹',
     'Raised route line': '凸起路线',
+    'Raised route #{number}': '凸起路线 #{number}',
+    'Route file': '路线文件',
     'Route width, mm': '路线宽度，mm',
     'Route height, mm': '路线高度，mm',
     'Route offset, mm': '路线离地偏移，mm',
     'Fit route': '适配路线',
     'Clear route': '清除路线',
+    'Fit all routes': '适配全部路线',
+    'Clear all routes': '清除全部路线',
+    'Add route': '增加路线',
+    'Fit': '适配',
+    'Clear': '清除',
+    'Remove': '删除',
     'Upload a GPX or KML track to print it as a raised line over the model.': '上传 GPX 或 KML 轨迹，将其作为模型上的凸起线路打印。',
+    'No active routes.': '没有已加载的路线。',
     'Optional DEM GeoTIFF': '可选 DEM GeoTIFF',
     'Uploaded DEM files override automatic terrain.': '上传 DEM 文件会覆盖自动地形。',
     'DEM attribution': 'DEM 署名',
@@ -533,6 +563,7 @@
     'Route file is not valid XML.': '路线文件不是有效的 XML。',
     'No GPX/KML route points found.': '没有找到 GPX/KML 路线点。',
     '{name}{segments} segment(s), {points} points.': '{name}{segments} 段，{points} 个点。',
+    '{count} route(s), {segments} segment(s), {points} points.': '{count} 条路线，{segments} 段，{points} 个点。',
     'Loading route...': '正在加载路线...',
     'Route load failed: {message}': '路线加载失败：{message}',
     'Load a GPX or KML route first.': '请先加载 GPX 或 KML 路线。',
@@ -552,6 +583,7 @@
     'Selection shape: {shape}': '选择形状：{shape}',
     'Area infill mode: {mode}': '区域补面模式：{mode}',
     'Route: {points} points, {segments} clipped segment(s), {width} mm × {height} mm': '路线：{points} 个点，{segments} 段裁剪线，{width} mm × {height} mm',
+    'Routes: {count}, {points} points, {segments} clipped segment(s)': '路线：{count} 条，{points} 个点，{segments} 段裁剪线',
     'OSM tiles: {count}': 'OSM 分块：{count}',
     'Overture buildings: {status}, added {added}, skipped overlaps {skipped}': 'Overture 补充建筑：{status}，新增 {added}，跳过重叠 {skipped}',
     'Features: {features}': '要素：{features}',
@@ -740,7 +772,9 @@
     if (typeof updateSelectionRadiusControl === 'function') updateSelectionRadiusControl(normalizeBBox(readBBox()));
     if (typeof updateRoadCleaningStatus === 'function') updateRoadCleaningStatus();
     if (typeof updateTerrainModeStatus === 'function') updateTerrainModeStatus();
+    if (typeof renderRouteControls === 'function') renderRouteControls();
     if (typeof updateRouteStatus === 'function') updateRouteStatus();
+    if (typeof updateConditionalSections === 'function') updateConditionalSections();
     if (typeof updateJobControls === 'function') updateJobControls();
     if (typeof refreshCacheStatus === 'function') refreshCacheStatus();
   }
@@ -757,9 +791,10 @@
   let moveStart = null;
   let moveStartBounds = null;
   let selectionKeyboardActive = false;
-  let routeSegments = [];
+  const ROUTE_COLORS = ['#dc3a30', '#2563eb', '#16a34a', '#d97706', '#9333ea', '#0f766e'];
+  let routes = [];
   let routeLayer = null;
-  let routeFileName = '';
+  let nextRouteId = 1;
   const cornerIcon = L.divIcon({className: 'bbox-handle', iconSize: [14, 14]});
   const edgeIcons = {
     n: L.divIcon({className: 'bbox-edge-handle bbox-edge-n', iconSize: [24, 10]}),
@@ -1380,10 +1415,6 @@
     }
   });
 
-  function routePointCount() {
-    return routeSegments.reduce((total, segment) => total + segment.length, 0);
-  }
-
   function normalizeRouteSegments(segments) {
     if (!Array.isArray(segments)) return [];
     const normalized = [];
@@ -1405,6 +1436,126 @@
       if (segment.length >= 2) normalized.push(segment);
     });
     return normalized;
+  }
+
+  function routePointCount(route = null) {
+    const segmentSets = route ? [route.segments || []] : routes.map(item => item.segments || []);
+    return segmentSets.reduce((total, segments) => (
+      total + normalizeRouteSegments(segments).reduce((sum, segment) => sum + segment.length, 0)
+    ), 0);
+  }
+
+  function routeSegmentCount(route = null) {
+    const segmentSets = route ? [route.segments || []] : routes.map(item => item.segments || []);
+    return segmentSets.reduce((total, segments) => total + normalizeRouteSegments(segments).length, 0);
+  }
+
+  function boundedRouteNumber(value, fallback, min, max) {
+    const parsed = parseFloat(value);
+    if (!Number.isFinite(parsed)) return fallback;
+    return clamp(parsed, min, max);
+  }
+
+  function createRouteConfig(data = {}) {
+    const id = Number.isFinite(data.id) ? data.id : nextRouteId;
+    nextRouteId = Math.max(nextRouteId, id + 1);
+    return {
+      id,
+      name: data.name || '',
+      fileName: data.fileName || data.filename || data.route_name || '',
+      segments: normalizeRouteSegments(data.segments || data.route_segments || []),
+      width_mm: boundedRouteNumber(data.width_mm ?? data.route_width_mm, 1.20, 0.15, 20),
+      height_mm: boundedRouteNumber(data.height_mm ?? data.route_height_mm, 0.80, 0.05, 20),
+      offset_mm: boundedRouteNumber(data.offset_mm ?? data.route_offset_mm, 0.15, 0, 30),
+    };
+  }
+
+  function ensureRoutes() {
+    if (!routes.length) routes.push(createRouteConfig());
+  }
+
+  function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, ch => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;',
+    }[ch]));
+  }
+
+  function routeTitle(index) {
+    return tr('Raised route #{number}', {number: index + 1});
+  }
+
+  function routeDisplayName(route, index) {
+    return route.fileName || route.name || routeTitle(index);
+  }
+
+  function syncRouteInputs() {
+    routes.forEach(route => {
+      const card = document.querySelector(`[data-route-id="${route.id}"]`);
+      if (!card) return;
+      route.width_mm = boundedRouteNumber(card.querySelector('[data-route-field="width_mm"]')?.value, route.width_mm, 0.15, 20);
+      route.height_mm = boundedRouteNumber(card.querySelector('[data-route-field="height_mm"]')?.value, route.height_mm, 0.05, 20);
+      route.offset_mm = boundedRouteNumber(card.querySelector('[data-route-field="offset_mm"]')?.value, route.offset_mm, 0, 30);
+    });
+  }
+
+  function activeRouteConfigs() {
+    syncRouteInputs();
+    return routes.map((route, index) => ({
+      name: routeDisplayName(route, index),
+      segments: normalizeRouteSegments(route.segments),
+      width_mm: route.width_mm,
+      height_mm: route.height_mm,
+      offset_mm: route.offset_mm,
+    })).filter(route => route.segments.length > 0);
+  }
+
+  function setRoutesFromProject(p = {}) {
+    nextRouteId = 1;
+    const projectRoutes = Array.isArray(p.routes) ? p.routes : [];
+    routes = projectRoutes.map(route => createRouteConfig(route)).filter(route => route.segments.length || route.fileName || route.name);
+    if (!routes.length && Array.isArray(p.route_segments) && p.route_segments.length) {
+      routes = [createRouteConfig({
+        name: p.route_name || '',
+        fileName: p.route_name || '',
+        segments: p.route_segments,
+        width_mm: p.route_width_mm,
+        height_mm: p.route_height_mm,
+        offset_mm: p.route_offset_mm,
+      })];
+    }
+    if (!routes.length) routes = [createRouteConfig()];
+    renderRouteControls();
+    updateRouteLayer();
+    updateRouteStatus();
+  }
+
+  function renderRouteControls() {
+    ensureRoutes();
+    const list = document.getElementById('routeList');
+    list.innerHTML = routes.map((route, index) => `
+      <div class="route-card" data-route-id="${route.id}">
+        <div class="route-card-header">
+          <div class="route-card-title">${escapeHtml(routeTitle(index))}</div>
+          <div class="route-card-actions">
+            <button class="secondary" type="button" data-route-action="fit">${escapeHtml(tr('Fit'))}</button>
+            <button class="secondary" type="button" data-route-action="clear">${escapeHtml(tr('Clear'))}</button>
+            <button class="secondary danger" type="button" data-route-action="remove">${escapeHtml(tr('Remove'))}</button>
+          </div>
+        </div>
+        <label>${escapeHtml(tr('Route file'))}</label>
+        <input type="file" data-route-field="file" accept=".gpx,.kml,application/gpx+xml,application/vnd.google-earth.kml+xml" />
+        <div class="small">${escapeHtml(route.fileName || tr('No active routes.'))}</div>
+        <div class="row">
+          <div><label>${escapeHtml(tr('Route width, mm'))}</label><input data-route-field="width_mm" type="number" value="${route.width_mm.toFixed(2)}" min="0.15" max="20" step="0.05"></div>
+          <div><label>${escapeHtml(tr('Route height, mm'))}</label><input data-route-field="height_mm" type="number" value="${route.height_mm.toFixed(2)}" min="0.05" max="20" step="0.05"></div>
+          <div><label>${escapeHtml(tr('Route offset, mm'))}</label><input data-route-field="offset_mm" type="number" value="${route.offset_mm.toFixed(2)}" min="0" max="30" step="0.05"></div>
+        </div>
+      </div>
+    `).join('');
   }
 
   function xmlLocalName(node) {
@@ -1475,65 +1626,93 @@
       map.removeLayer(routeLayer);
       routeLayer = null;
     }
-    if (!routeSegments.length) return;
-    routeLayer = L.featureGroup(routeSegments.map(segment => L.polyline(segment, {
-      color: '#dc3a30',
-      weight: 4,
-      opacity: 0.9,
-      lineJoin: 'round',
-      lineCap: 'round',
-    }))).addTo(map);
+    const routeLines = [];
+    routes.forEach((route, index) => {
+      normalizeRouteSegments(route.segments).forEach(segment => {
+        routeLines.push(L.polyline(segment, {
+          color: ROUTE_COLORS[index % ROUTE_COLORS.length],
+          weight: 4,
+          opacity: 0.9,
+          lineJoin: 'round',
+          lineCap: 'round',
+        }));
+      });
+    });
+    if (!routeLines.length) return;
+    routeLayer = L.featureGroup(routeLines).addTo(map);
   }
 
   function updateRouteStatus(message = '') {
     const status = document.getElementById('routeStatus');
+    if (!status) return;
     if (message) {
       status.textContent = message;
       return;
     }
-    if (!routeSegments.length) {
+    if (!document.getElementById('include_route').checked) {
       status.textContent = tr('Upload a GPX or KML track to print it as a raised line over the model.');
       return;
     }
-    const name = routeFileName ? `${routeFileName}: ` : '';
-    status.textContent = tr('{name}{segments} segment(s), {points} points.', {
-      name,
-      segments: routeSegments.length,
-      points: routePointCount(),
+    const active = activeRouteConfigs();
+    if (!active.length) {
+      status.textContent = tr('No active routes.');
+      return;
+    }
+    status.textContent = tr('{count} route(s), {segments} segment(s), {points} points.', {
+      count: active.length,
+      segments: active.reduce((total, route) => total + route.segments.length, 0),
+      points: active.reduce((total, route) => total + route.segments.reduce((sum, segment) => sum + segment.length, 0), 0),
     });
   }
 
-  function setRouteSegments(segments, filename = '') {
-    routeSegments = normalizeRouteSegments(segments);
-    routeFileName = filename || '';
-    document.getElementById('include_route').checked = routeSegments.length > 0;
+  function setRouteSegments(routeId, segments, filename = '') {
+    const route = routes.find(item => item.id === routeId);
+    if (!route) return;
+    route.segments = normalizeRouteSegments(segments);
+    route.fileName = filename || route.fileName || '';
+    route.name = route.fileName || route.name || '';
+    if (route.segments.length) document.getElementById('include_route').checked = true;
+    renderRouteControls();
+    updateConditionalSections();
     updateRouteLayer();
     updateRouteStatus();
   }
 
-  async function loadRouteFile(file) {
+  async function loadRouteFile(routeId, file) {
     const status = document.getElementById('routeStatus');
     status.textContent = tr('Loading route...');
     try {
       const segments = parseRouteText(await file.text(), file.name);
-      setRouteSegments(segments, file.name);
+      setRouteSegments(routeId, segments, file.name);
       if (routeLayer) map.fitBounds(routeLayer.getBounds(), {padding: [24, 24]});
     } catch (err) {
-      routeSegments = [];
-      routeFileName = '';
+      const route = routes.find(item => item.id === routeId);
+      if (route) {
+        route.segments = [];
+        route.fileName = '';
+      }
       updateRouteLayer();
-      document.getElementById('include_route').checked = false;
+      renderRouteControls();
       status.textContent = tr('Route load failed: {message}', {message: err.message});
     }
   }
 
-  function fitSelectionToRoute() {
-    if (!routeLayer) {
+  function routeBounds(routeId = null) {
+    if (routeId === null) {
+      return routeLayer ? routeLayer.getBounds() : null;
+    }
+    const route = routes.find(item => item.id === routeId);
+    if (!route || !route.segments.length) return null;
+    const group = L.featureGroup(normalizeRouteSegments(route.segments).map(segment => L.polyline(segment)));
+    return group.getBounds();
+  }
+
+  function fitSelectionToRoute(routeId = null) {
+    const bounds = routeBounds(routeId);
+    if (!bounds || !bounds.isValid()) {
       updateRouteStatus(tr('Load a GPX or KML route first.'));
       return;
     }
-    const bounds = routeLayer.getBounds();
-    if (!bounds.isValid()) return;
     const south = bounds.getSouth();
     const north = bounds.getNorth();
     const west = bounds.getWest();
@@ -1551,21 +1730,69 @@
     map.fitBounds(currentSelectionBounds(), {padding: [24, 24]});
   }
 
-  function clearRoute() {
-    routeSegments = [];
-    routeFileName = '';
-    document.getElementById('route_file').value = '';
-    document.getElementById('include_route').checked = false;
+  function clearRoute(routeId = null) {
+    if (routeId === null) {
+      routes = [createRouteConfig()];
+      document.getElementById('include_route').checked = false;
+    } else {
+      const route = routes.find(item => item.id === routeId);
+      if (route) {
+        route.segments = [];
+        route.fileName = '';
+        route.name = '';
+      }
+    }
+    renderRouteControls();
+    updateConditionalSections();
     updateRouteLayer();
     updateRouteStatus();
   }
 
-  document.getElementById('route_file').addEventListener('change', event => {
+  function removeRoute(routeId) {
+    if (routes.length <= 1) {
+      clearRoute(routeId);
+      return;
+    }
+    routes = routes.filter(route => route.id !== routeId);
+    renderRouteControls();
+    updateRouteLayer();
+    updateRouteStatus();
+  }
+
+  function addRoute() {
+    routes.push(createRouteConfig());
+    document.getElementById('include_route').checked = true;
+    renderRouteControls();
+    updateConditionalSections();
+    updateRouteStatus();
+  }
+
+  document.getElementById('routeList').addEventListener('change', event => {
+    if (event.target?.dataset?.routeField !== 'file') return;
+    const routeId = parseInt(event.target.closest('[data-route-id]')?.dataset.routeId, 10);
     const file = event.target.files[0];
-    if (file) loadRouteFile(file);
+    if (Number.isFinite(routeId) && file) loadRouteFile(routeId, file);
   });
-  document.getElementById('fitRoute').addEventListener('click', fitSelectionToRoute);
-  document.getElementById('clearRoute').addEventListener('click', clearRoute);
+  document.getElementById('routeList').addEventListener('input', event => {
+    if (!event.target?.dataset?.routeField) return;
+    syncRouteInputs();
+    updateRouteStatus();
+  });
+  document.getElementById('routeList').addEventListener('click', event => {
+    const button = event.target.closest('[data-route-action]');
+    if (!button) return;
+    const routeId = parseInt(button.closest('[data-route-id]')?.dataset.routeId, 10);
+    if (!Number.isFinite(routeId)) return;
+    const action = button.dataset.routeAction;
+    if (action === 'fit') fitSelectionToRoute(routeId);
+    if (action === 'clear') clearRoute(routeId);
+    if (action === 'remove') removeRoute(routeId);
+  });
+  document.getElementById('addRoute').addEventListener('click', addRoute);
+  document.getElementById('fitRoute').addEventListener('click', () => fitSelectionToRoute());
+  document.getElementById('clearRoute').addEventListener('click', () => clearRoute());
+  renderRouteControls();
+  updateRouteStatus();
 
   const preview = document.getElementById('preview');
   const previewShell = preview.closest('.preview-shell');
@@ -1765,7 +1992,7 @@
 
   function applyProjectParams(saved) {
     const p = saved.params || saved;
-    const numericIds = ['south','west','north','east','max_size_mm','base_thickness_mm','vertical_exaggeration','terrain_grid_size','building_height_multiplier','max_building_height_mm','default_building_height_m','min_road_width_mm','footway_width_mm','pedestrian_width_mm','bridge_clearance_mm','area_infill_height_mm','route_width_mm','route_height_mm','route_offset_mm','max_terrain_height_mm','terrain_tile_zoom','osm_tile_size_km','road_cleaning_level','chunk_rows','chunk_cols'];
+    const numericIds = ['south','west','north','east','max_size_mm','base_thickness_mm','vertical_exaggeration','terrain_grid_size','building_height_multiplier','max_building_height_mm','default_building_height_m','min_road_width_mm','footway_width_mm','pedestrian_width_mm','bridge_clearance_mm','area_infill_height_mm','max_terrain_height_mm','terrain_tile_zoom','osm_tile_size_km','road_cleaning_level','chunk_rows','chunk_cols'];
     numericIds.forEach(id => {
       if (p[id] !== undefined && document.getElementById(id)) document.getElementById(id).value = p[id];
     });
@@ -1790,11 +2017,9 @@
     if (detailSelected) detailSelected.checked = true;
     if (p.output_name !== undefined) document.getElementById('output_name').value = p.output_name;
     if (p.dem_attribution !== undefined) document.getElementById('dem_attribution').value = p.dem_attribution;
-    routeSegments = normalizeRouteSegments(p.route_segments || []);
-    routeFileName = p.route_name || '';
-    updateRouteLayer();
+    setRoutesFromProject(p);
+    if (p.include_route === undefined && activeRouteConfigs().length) document.getElementById('include_route').checked = true;
     updateRouteStatus();
-    if (p.include_route === undefined && routeSegments.length) document.getElementById('include_route').checked = true;
     let mode = saved.selection_mode;
     if (!mode && p.selection_shape === 'circle') mode = 'circle';
     if (!mode && p.selection_shape === 'hexagon') mode = 'hexagon';
@@ -1804,6 +2029,7 @@
     }
     updateRoadCleaningStatus();
     updateTerrainModeStatus();
+    updateConditionalSections();
     if (Array.isArray(p.road_levels)) setRoadLevels(p.road_levels);
     drawRect();
   }
@@ -1836,6 +2062,26 @@
   });
   document.getElementById('auto_terrain').addEventListener('change', updateTerrainModeStatus);
   document.getElementById('dem_file').addEventListener('change', updateTerrainModeStatus);
+  document.getElementById('include_area_infill').addEventListener('change', updateConditionalSections);
+  document.getElementById('include_route').addEventListener('change', () => {
+    updateConditionalSections();
+    updateRouteStatus();
+  });
+  document.getElementById('chunk_export').addEventListener('change', updateConditionalSections);
+
+  function setConditionalVisible(id, visible) {
+    const node = document.getElementById(id);
+    if (node) node.classList.toggle('hidden', !visible);
+  }
+
+  function updateConditionalSections() {
+    const auto = document.getElementById('auto_terrain').checked;
+    const hasDem = Boolean(document.getElementById('dem_file').files[0]);
+    setConditionalVisible('terrainAdvanced', auto || hasDem);
+    setConditionalVisible('areaInfillAdvanced', document.getElementById('include_area_infill').checked);
+    setConditionalVisible('routeAdvanced', document.getElementById('include_route').checked);
+    setConditionalVisible('chunkAdvanced', document.getElementById('chunk_export').checked);
+  }
 
   function updateTerrainModeStatus() {
     const large = document.getElementById('large_map_mode').checked;
@@ -1857,11 +2103,13 @@
     } else {
       status.textContent = tr('Flat base: terrain relief controls are ignored unless Auto terrain relief is on or a DEM is uploaded.');
     }
+    updateConditionalSections();
   }
   updateTerrainModeStatus();
+  updateConditionalSections();
 
   function params() {
-    const ids = ['south','west','north','east','max_size_mm','base_thickness_mm','vertical_exaggeration','terrain_grid_size','building_height_multiplier','max_building_height_mm','default_building_height_m','min_road_width_mm','footway_width_mm','pedestrian_width_mm','bridge_clearance_mm','area_infill_height_mm','route_width_mm','route_height_mm','route_offset_mm','max_terrain_height_mm','terrain_tile_zoom','osm_tile_size_km','road_cleaning_level','chunk_rows','chunk_cols'];
+    const ids = ['south','west','north','east','max_size_mm','base_thickness_mm','vertical_exaggeration','terrain_grid_size','building_height_multiplier','max_building_height_mm','default_building_height_m','min_road_width_mm','footway_width_mm','pedestrian_width_mm','bridge_clearance_mm','area_infill_height_mm','max_terrain_height_mm','terrain_tile_zoom','osm_tile_size_km','road_cleaning_level','chunk_rows','chunk_cols'];
     const p = {};
     ids.forEach(id => p[id] = parseFloat(document.getElementById(id).value));
     p.large_map_mode = document.getElementById('large_map_mode').checked;
@@ -1889,8 +2137,14 @@
     p.dem_attribution = document.getElementById('dem_attribution').value;
     p.output_name = document.getElementById('output_name').value.trim() || 'city_model';
     p.project_name = p.output_name;
-    p.route_name = routeFileName;
-    p.route_segments = routeSegments;
+    const routeConfigs = activeRouteConfigs();
+    p.routes = routeConfigs;
+    const firstRoute = routeConfigs[0];
+    p.route_name = firstRoute ? firstRoute.name : '';
+    p.route_segments = firstRoute ? firstRoute.segments : [];
+    p.route_width_mm = firstRoute ? firstRoute.width_mm : 1.20;
+    p.route_height_mm = firstRoute ? firstRoute.height_mm : 0.80;
+    p.route_offset_mm = firstRoute ? firstRoute.offset_mm : 0.15;
     return p;
   }
 
@@ -1974,7 +2228,13 @@
         if (s.water_cutout && s.water_cutout.enabled) statusEl.textContent += `\n${tr('Water cutout: on ({count} polygons)', {count: s.water_cutout.polygons})}`;
         if (s.selection_shape) statusEl.textContent += `\n${tr('Selection shape: {shape}', {shape: tr(s.selection_shape)})}`;
         if (s.area_infill_mode) statusEl.textContent += `\n${tr('Area infill mode: {mode}', {mode: tr(s.area_infill_mode)})}`;
-        if (s.route && s.route.enabled) statusEl.textContent += `\n${tr('Route: {points} points, {segments} clipped segment(s), {width} mm × {height} mm', {points: s.route.points, segments: s.route.clipped_segments, width: s.route.width_mm, height: s.route.height_mm})}`;
+        if (s.route && s.route.enabled) {
+          if ((s.route.routes || 1) > 1) {
+            statusEl.textContent += `\n${tr('Routes: {count}, {points} points, {segments} clipped segment(s)', {count: s.route.routes, points: s.route.points, segments: s.route.clipped_segments})}`;
+          } else {
+            statusEl.textContent += `\n${tr('Route: {points} points, {segments} clipped segment(s), {width} mm × {height} mm', {points: s.route.points, segments: s.route.clipped_segments, width: s.route.width_mm, height: s.route.height_mm})}`;
+          }
+        }
         if (s.osm_tile_count) statusEl.textContent += `\n${tr('OSM tiles: {count}', {count: s.osm_tile_count})}`;
         if (s.overture_buildings && s.overture_buildings.enabled) {
           statusEl.textContent += `\n${tr('Overture buildings: {status}, added {added}, skipped overlaps {skipped}', {
@@ -2067,8 +2327,6 @@
     form.append('params', JSON.stringify(params()));
     const dem = document.getElementById('dem_file').files[0];
     if (dem) form.append('dem_file', dem);
-    const routeFile = document.getElementById('route_file').files[0];
-    if (routeFile) form.append('route_file', routeFile);
     try {
       const res = await fetch('/api/jobs', {method: 'POST', body: form});
       const data = await res.json();

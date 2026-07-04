@@ -6,6 +6,22 @@ Time zone: local macOS time. Some early entries are reconstructed from request o
 
 ## 2026-07-04
 
+### 13:25 - 3MF Assembly Export for Layer Alignment
+
+- Fixed large-map 3MF imports where slicers could treat airport/runway layers as independent models and separate them from the terrain tile.
+- Wrapped multi-layer 3MF exports into one assembly build item while preserving terrain, buildings, airport, water, road, green, parking, and area-infill meshes as internal components.
+- Verified the provided `北京西北` project against cached OSM data: the repaired 3MF has one build item, eight layer components, and airport vertices inside the 180 mm × 150.7 mm model footprint.
+- Added regression coverage for multi-part 3MF assembly structure and updated the app version to `v0.59`.
+
+### 12:51 - Cleaner Conditional Settings Panel and Multi-Route Tracks
+
+- Changed the left settings panel so terrain relief, area infill, raised route, and chunk export detail controls only appear when their parent feature is enabled.
+- Removed the extra rail/subway helper sentence from the Layers section while keeping rail and subway line switches in Road Levels.
+- Reworked Route / Track into a multi-route editor with independent GPX/KML upload, width, height, and offset controls for each raised route.
+- Added backend support for saved `routes` arrays while preserving old single-route project JSON and upload compatibility.
+- Added regression tests for multi-route project params, generation summaries, and legacy route uploads.
+- Updated the app version to `v0.58`.
+
 ### 11:58 - Printable Flat Skillion Building Parts and Version 0.57
 
 - Fixed high-detail palace/eave blocks whose side edges were repaired but whose tops still appeared sunken or sloped.

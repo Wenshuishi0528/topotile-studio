@@ -1,5 +1,6 @@
 from pathlib import Path
 import zipfile
+import xml.etree.ElementTree as ET
 import numpy as np
 import trimesh
 
@@ -40,3 +41,33 @@ def test_write_3mf_is_reimportable_by_trimesh(tmp_path: Path):
         rels_xml = zf.read("_rels/.rels").decode("utf-8")
     assert "p:UUID" in model_xml
     assert "<Relationships xmlns=" in rels_xml
+
+
+def test_write_3mf_wraps_multiple_parts_as_single_assembly(tmp_path: Path):
+    vertices = np.array([
+        [0, 0, 0], [10, 0, 0], [0, 10, 0], [0, 0, 10]
+    ], dtype=float)
+    faces = np.array([
+        [0, 1, 2], [0, 3, 1], [1, 3, 2], [2, 3, 0]
+    ], dtype=np.int64)
+    shifted = vertices + np.array([20.0, 0.0, 0.0])
+    path = write_3mf([
+        MeshPart("terrain", vertices, faces),
+        MeshPart("airport", shifted, faces),
+    ], tmp_path / "assembly.3mf")
+
+    with zipfile.ZipFile(path, "r") as zf:
+        root = ET.fromstring(zf.read("3D/3dmodel.model"))
+    ns = {"m": "http://schemas.microsoft.com/3dmanufacturing/core/2015/02"}
+    build_items = root.findall(".//m:build/m:item", ns)
+    objects = root.findall(".//m:object", ns)
+    component_objects = [obj for obj in objects if obj.find("m:components", ns) is not None]
+    components = component_objects[0].findall("m:components/m:component", ns)
+
+    assert len(build_items) == 1
+    assert len(objects) == 3
+    assert len(component_objects) == 1
+    assert len(components) == 2
+
+    scene = trimesh.load(path)
+    assert sum(len(mesh.faces) for mesh in scene.geometry.values()) == 8

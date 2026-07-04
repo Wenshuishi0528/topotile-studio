@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from io import BytesIO
 import zipfile
 from xml.etree import ElementTree as ET
 
@@ -15,6 +16,11 @@ CT_NS = "http://schemas.openxmlformats.org/package/2006/content-types"
 MODEL_REL_TYPE = "http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"
 
 ET.register_namespace("", CORE_NS)
+ET.register_namespace("b", "http://schemas.microsoft.com/3dmanufacturing/beamlattice/2017/02")
+ET.register_namespace("m", "http://schemas.microsoft.com/3dmanufacturing/material/2015/02")
+ET.register_namespace("p", "http://schemas.microsoft.com/3dmanufacturing/production/2015/06")
+ET.register_namespace("s", "http://schemas.microsoft.com/3dmanufacturing/slice/2015/07")
+ET.register_namespace("sc", "http://schemas.microsoft.com/3dmanufacturing/securecontent/2019/04")
 
 
 def _fmt(value: float) -> str:
@@ -108,8 +114,73 @@ def write_3mf(parts: list[MeshPart], path: str | Path, title: str = "TopoTile St
     data = scene.export(file_type="3mf")
     if isinstance(data, str):
         data = data.encode("utf-8")
+    data = wrap_3mf_build_items_as_assembly(data, title=title)
     path.write_bytes(data)
     return path
+
+
+def wrap_3mf_build_items_as_assembly(data: bytes, title: str = "TopoTile Studio / 3D地图工坊 City Tile") -> bytes:
+    """Make slicers import layer meshes as one assembled model.
+
+    Some slicers treat multiple 3MF build items as independent models and may
+    auto-arrange a layer away from the terrain. Keeping the mesh resources
+    separate but exposing one component assembly build item preserves alignment.
+    """
+    source = BytesIO(data)
+    try:
+        with zipfile.ZipFile(source, "r") as zin:
+            entries = {info.filename: zin.read(info.filename) for info in zin.infolist()}
+    except zipfile.BadZipFile:
+        return data
+    model_bytes = entries.get("3D/3dmodel.model")
+    if not model_bytes:
+        return data
+    try:
+        root = ET.fromstring(model_bytes)
+    except ET.ParseError:
+        return data
+
+    ns = {"m": CORE_NS}
+    resources = root.find("m:resources", ns)
+    build = root.find("m:build", ns)
+    if resources is None or build is None:
+        return data
+    build_items = list(build.findall("m:item", ns))
+    if len(build_items) <= 1:
+        return data
+
+    object_ids: list[int] = []
+    for obj in resources.findall("m:object", ns):
+        try:
+            object_ids.append(int(obj.attrib.get("id", "0")))
+        except ValueError:
+            continue
+    assembly_id = max(object_ids or [0]) + 1
+    assembly = ET.SubElement(resources, f"{{{CORE_NS}}}object", {
+        "id": str(assembly_id),
+        "type": "model",
+        "name": _safe_name(f"{title} assembly"),
+    })
+    components = ET.SubElement(assembly, f"{{{CORE_NS}}}components")
+    for item in build_items:
+        object_id = item.attrib.get("objectid")
+        if not object_id:
+            continue
+        attrs = {"objectid": object_id}
+        if item.attrib.get("transform"):
+            attrs["transform"] = item.attrib["transform"]
+        ET.SubElement(components, f"{{{CORE_NS}}}component", attrs)
+
+    for item in build_items:
+        build.remove(item)
+    ET.SubElement(build, f"{{{CORE_NS}}}item", {"objectid": str(assembly_id)})
+    entries["3D/3dmodel.model"] = ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+    output = BytesIO()
+    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as zout:
+        for filename, payload in entries.items():
+            zout.writestr(filename, payload)
+    return output.getvalue()
 
 
 def validate_3mf(path: str | Path) -> dict[str, int | list[str]]:

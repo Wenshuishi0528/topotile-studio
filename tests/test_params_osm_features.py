@@ -130,6 +130,44 @@ def test_model_params_accepts_saved_route_segments():
     assert params.route_offset_mm == 0.2
     assert params.route_name == "walk.gpx"
     assert params.route_segments == [[[47.621, -122.352], [47.622, -122.351]]]
+    assert params.routes == [{
+        "name": "walk.gpx",
+        "segments": [[[47.621, -122.352], [47.622, -122.351]]],
+        "width_mm": 1.4,
+        "height_mm": 0.9,
+        "offset_mm": 0.2,
+    }]
+
+
+def test_model_params_accepts_multiple_saved_routes():
+    params = ModelParams.from_dict({
+        "bbox": [47.62, -122.355, 47.626, -122.3455],
+        "include_route": "true",
+        "routes": [
+            {
+                "name": "walk.gpx",
+                "segments": [[[47.621, -122.352], [47.622, -122.351]]],
+                "width_mm": "1.1",
+                "height_mm": "0.7",
+                "offset_mm": "0.1",
+            },
+            {
+                "name": "ride.kml",
+                "segments": [[[47.623, -122.350], [47.624, -122.349], [47.625, -122.348]]],
+                "width_mm": "1.8",
+                "height_mm": "1.0",
+                "offset_mm": "0.25",
+            },
+        ],
+    })
+
+    assert params.include_route is True
+    assert len(params.routes) == 2
+    assert params.route_name == "walk.gpx"
+    assert params.route_width_mm == 1.1
+    assert params.routes[1]["name"] == "ride.kml"
+    assert params.routes[1]["width_mm"] == 1.8
+    assert params.routes[1]["segments"][0][-1] == [47.625, -122.348]
 
 
 def test_model_params_accepts_auto_terrain():
