@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 import math
 import re
 import numpy as np
 
 from shapely.geometry import Polygon, MultiPolygon, LineString, MultiLineString, GeometryCollection, Point, MultiPoint
 from shapely.geometry.base import BaseGeometry
+from shapely.affinity import scale as scale_geometry
 from shapely import constrained_delaunay_triangles
 from shapely.ops import triangulate, unary_union
 from shapely.prepared import prep
@@ -29,6 +30,10 @@ COLORS = {
     "airport": (168, 168, 156, 255),
     "area_infill": (176, 164, 138, 255),
     "route": (220, 58, 48, 255),
+    "rail_lines": (72, 72, 72, 255),
+    "rail_stations": (214, 214, 206, 255),
+    "subway_lines": (170, 55, 170, 255),
+    "subway_stations": (205, 180, 230, 255),
 }
 
 MIN_PRINTABLE_HOLE_AREA_MM2 = 1e-3
@@ -550,6 +555,7 @@ def _add_building_terrain_triangle(
     coords: list[tuple[float, float]],
     terrain: TerrainGrid,
     roof_z: float,
+    bottom_offset_mm: float = 0.0,
 ) -> None:
     if len(coords) < 3:
         return
@@ -557,7 +563,7 @@ def _add_building_terrain_triangle(
     area = _signed_area(tri + [tri[0]])
     if abs(area) <= 1e-12:
         return
-    bottom = [terrain.sample_z(x, y) for x, y in tri]
+    bottom = [terrain.sample_z(x, y) + bottom_offset_mm for x, y in tri]
     top_idx = [_vertex_id(vertices, cache, x, y, roof_z) for x, y in tri]
     bottom_idx = [_vertex_id(vertices, cache, x, y, z) for (x, y), z in zip(tri, bottom)]
     for top_vertex, bottom_vertex in zip(top_idx, bottom_idx):
@@ -580,14 +586,16 @@ def extrude_building_on_terrain(
     height_mm: float,
     name: str,
     color: tuple[int, int, int, int],
+    min_height_mm: float = 0.0,
 ) -> MeshPart:
     poly = _clean_polygon(poly)  # type: ignore[assignment]
     if poly is None or height_mm <= 0:
         return MeshPart(name, np.zeros((0, 3)), np.zeros((0, 3), dtype=np.int64), color)
+    min_height_mm = max(0.0, min(float(min_height_mm), max(0.0, height_mm - 0.05)))
     if not _terrain_has_relief(terrain):
         point = poly.representative_point()
         z0 = terrain.sample_z(point.x, point.y)
-        return extrude_polygon(poly, z0, z0 + height_mm, name, color)
+        return extrude_polygon(poly, z0 + min_height_mm, z0 + height_mm, name, color)
 
     points = _sample_building_bottom_points(poly, terrain)
     if len(points) < 3:
@@ -595,8 +603,9 @@ def extrude_building_on_terrain(
         z0 = terrain.sample_z(point.x, point.y)
         return extrude_polygon(poly, z0, z0 + height_mm, name, color)
 
-    bottom_z = [terrain.sample_z(x, y) for x, y in points]
-    roof_z = _building_roof_z(bottom_z, height_mm)
+    terrain_z = [terrain.sample_z(x, y) for x, y in points]
+    bottom_z = [z + min_height_mm for z in terrain_z]
+    roof_z = max(_building_roof_z(terrain_z, height_mm), max(bottom_z) + 0.05)
 
     try:
         candidates = triangulate(MultiPoint(points))
@@ -620,7 +629,17 @@ def extrude_building_on_terrain(
         for piece in iter_polygons(clipped):
             for tri in _triangulate_polygon(piece):
                 coords = [(float(x), float(y)) for x, y in list(tri.exterior.coords)[:3]]
-                _add_building_terrain_triangle(vertices, faces, cache, top_faces, top_to_bottom, coords, terrain, roof_z)
+                _add_building_terrain_triangle(
+                    vertices,
+                    faces,
+                    cache,
+                    top_faces,
+                    top_to_bottom,
+                    coords,
+                    terrain,
+                    roof_z,
+                    bottom_offset_mm=min_height_mm,
+                )
 
     _add_boundary_sides_from_top_faces(faces, top_faces, top_to_bottom)
 
@@ -718,6 +737,19 @@ def iter_lines(geom: BaseGeometry) -> Iterable[LineString]:
             yield from iter_lines(g)
 
 
+def iter_points(geom: BaseGeometry) -> Iterable[Point]:
+    if geom.is_empty:
+        return
+    if isinstance(geom, Point):
+        yield geom
+    elif isinstance(geom, MultiPoint):
+        for g in geom.geoms:
+            yield g
+    elif isinstance(geom, GeometryCollection):
+        for g in geom.geoms:
+            yield from iter_points(g)
+
+
 def transform_polygon_to_mm(poly_m: Polygon, scaler: ModelScaler, simplify_tolerance_m: float = 0.0) -> Polygon | None:
     if simplify_tolerance_m > 0:
         poly_m = poly_m.simplify(simplify_tolerance_m, preserve_topology=True)
@@ -793,10 +825,864 @@ def parse_length_m(text: str, min_m: float = 0.0, max_m: float = 100.0) -> float
     return parsed if min_m <= parsed <= max_m else None
 
 
+def parse_min_height_m(tags: dict[str, str], params: ModelParams) -> float:
+    for key in ("min_height", "building:min_height"):
+        if key in tags:
+            parsed = parse_length_m(tags[key], min_m=0.0, max_m=900.0)
+            if parsed is not None:
+                return parsed
+    for key in ("min_level", "min_levels", "building:min_level", "building:min_levels"):
+        if key in tags:
+            match = re.search(r"[-+]?\d*\.?\d+", str(tags[key]))
+            if match:
+                levels = float(match.group(0))
+                if 0.0 <= levels <= 200:
+                    return levels * params.level_height_m
+    return 0.0
+
+
+def parse_roof_height_m(tags: dict[str, str], params: ModelParams, building_height_m: float) -> float | None:
+    for key in ("roof:height", "building:roof:height"):
+        if key in tags:
+            parsed = parse_length_m(tags[key], min_m=0.05, max_m=300.0)
+            if parsed is not None:
+                return min(parsed, max(0.05, building_height_m * 0.85))
+    for key in ("roof:levels", "building:roof:levels"):
+        if key in tags:
+            match = re.search(r"[-+]?\d*\.?\d+", str(tags[key]))
+            if match:
+                levels = float(match.group(0))
+                if 0.05 <= levels <= 80:
+                    return min(levels * params.level_height_m, max(0.05, building_height_m * 0.85))
+    return None
+
+
+def _is_high_detail_mode(params: ModelParams) -> bool:
+    return getattr(params, "model_detail_mode", "normal") == "high"
+
+
+ROOF_SHAPE_ALIASES = {
+    "gable": "gabled",
+    "gable_roof": "gabled",
+    "half-hip": "hipped",
+    "half_hipped": "hipped",
+    "pyramid": "pyramidal",
+    "shed": "skillion",
+    "lean_to": "skillion",
+    "round": "dome",
+    "hemispherical": "dome",
+    "spherical": "dome",
+    "onion": "dome",
+    "mansard": "hipped",
+    "gambrel": "gabled",
+    "saltbox": "gabled",
+}
+SUPPORTED_OSM_ROOF_SHAPES = {"gabled", "hipped", "pyramidal", "skillion", "dome"}
+
+
+def roof_shape_from_tags(tags: dict[str, str]) -> str | None:
+    raw = str(tags.get("roof:shape") or tags.get("building:roof:shape") or "").strip().lower()
+    if not raw:
+        return None
+    raw = raw.replace(" ", "_")
+    shape = ROOF_SHAPE_ALIASES.get(raw, raw)
+    if shape in {"flat", "none"}:
+        return None
+    return shape if shape in SUPPORTED_OSM_ROOF_SHAPES else None
+
+
+def _printable_roof_shape_from_tags(tags: dict[str, str]) -> str | None:
+    shape = roof_shape_from_tags(tags)
+    if shape == "skillion" and "building:part" in tags:
+        return None
+    return shape
+
+
+def _is_building_part_feature(feature: OSMFeature) -> bool:
+    return "building:part" in feature.tags
+
+
+def _is_monument_feature(tags: dict[str, str]) -> bool:
+    historic = tags.get("historic")
+    memorial = tags.get("memorial")
+    return historic in {"monument", "memorial"} or memorial in {"stele", "obelisk", "statue"}
+
+
+def _feature_polygons_single(feature: OSMFeature) -> list[Polygon]:
+    return [poly for poly in iter_polygons(feature.geometry_m) if not poly.is_empty and poly.area > 1e-6]
+
+
+def _overlaps_building_parts(feature: OSMFeature, part_polys: list[Polygon], part_tree: STRtree) -> bool:
+    polys = _feature_polygons_single(feature)
+    if not polys:
+        return False
+    for poly in polys:
+        try:
+            candidates = part_tree.query(poly)
+        except Exception:
+            continue
+        overlap_area = 0.0
+        for raw_index in candidates:
+            try:
+                part = part_polys[int(raw_index)]
+            except (TypeError, ValueError, IndexError):
+                continue
+            if part.is_empty or part.area <= 1e-6:
+                continue
+            try:
+                overlap_area += float(poly.intersection(part).area)
+            except Exception:
+                continue
+            if overlap_area / max(poly.area, 1e-6) >= 0.05:
+                return True
+    return False
+
+
+def _select_building_features_for_detail(features: list[OSMFeature], params: ModelParams) -> list[OSMFeature]:
+    if not _is_high_detail_mode(params):
+        return features
+    part_features = [feature for feature in features if _is_building_part_feature(feature)]
+    part_polys = [poly for feature in part_features for poly in _feature_polygons_single(feature)]
+    if not part_polys:
+        return features
+    part_tree = STRtree(part_polys)
+    selected: list[OSMFeature] = []
+    for feature in features:
+        if _is_building_part_feature(feature) or _is_monument_feature(feature.tags):
+            selected.append(feature)
+            continue
+        if "building" in feature.tags and _overlaps_building_parts(feature, part_polys, part_tree):
+            continue
+        selected.append(feature)
+    return selected
+
+
+def _scaled_building_poly(poly: Polygon, factor: float) -> Polygon | None:
+    try:
+        scaled = scale_geometry(poly, xfact=factor, yfact=factor, origin="centroid")
+    except Exception:
+        return None
+    return _clean_polygon(scaled)  # type: ignore[arg-type, return-value]
+
+
+def _oriented_rectangle_part(poly: Polygon, long_factor: float, short_factor: float) -> Polygon | None:
+    try:
+        rect = poly.minimum_rotated_rectangle
+        coords = list(rect.exterior.coords)[:4]
+    except Exception:
+        return None
+    if len(coords) < 4:
+        return _scaled_building_poly(poly, min(long_factor, short_factor))
+
+    edges: list[tuple[float, tuple[float, float]]] = []
+    for p0, p1 in zip(coords, coords[1:] + coords[:1]):
+        dx = float(p1[0] - p0[0])
+        dy = float(p1[1] - p0[1])
+        length = math.hypot(dx, dy)
+        if length > 1e-9:
+            edges.append((length, (dx / length, dy / length)))
+    if len(edges) < 2:
+        return _scaled_building_poly(poly, min(long_factor, short_factor))
+
+    edges.sort(key=lambda item: item[0], reverse=True)
+    long_len, long_axis = edges[0]
+    short_len, short_axis = edges[-1]
+    center = poly.centroid
+    cx = float(center.x)
+    cy = float(center.y)
+    lu = max(0.05, long_len * long_factor / 2.0)
+    sv = max(0.05, short_len * short_factor / 2.0)
+    ux, uy = long_axis
+    vx, vy = short_axis
+    try:
+        candidate = Polygon([
+            (cx - ux * lu - vx * sv, cy - uy * lu - vy * sv),
+            (cx + ux * lu - vx * sv, cy + uy * lu - vy * sv),
+            (cx + ux * lu + vx * sv, cy + uy * lu + vy * sv),
+            (cx - ux * lu + vx * sv, cy - uy * lu + vy * sv),
+        ])
+    except Exception:
+        return _scaled_building_poly(poly, min(long_factor, short_factor))
+    return _clean_polygon(candidate)  # type: ignore[arg-type, return-value]
+
+
+def _building_top_z_for_height(poly: Polygon, terrain: TerrainGrid, height_mm: float, min_height_mm: float = 0.0) -> float:
+    min_height_mm = max(0.0, min(float(min_height_mm), max(0.0, height_mm - 0.05)))
+    if not _terrain_has_relief(terrain):
+        point = poly.representative_point()
+        return terrain.sample_z(point.x, point.y) + height_mm
+    points = _sample_building_bottom_points(poly, terrain)
+    if not points:
+        point = poly.representative_point()
+        return terrain.sample_z(point.x, point.y) + height_mm
+    terrain_z = [terrain.sample_z(x, y) for x, y in points]
+    bottom_z = [z + min_height_mm for z in terrain_z]
+    return max(_building_roof_z(terrain_z, height_mm), max(bottom_z) + 0.05)
+
+
+def _roof_axes(poly: Polygon) -> tuple[tuple[float, float], tuple[float, float], tuple[float, float], float, float]:
+    center = poly.representative_point()
+    cx = float(center.x)
+    cy = float(center.y)
+    ux, uy = 1.0, 0.0
+    vx, vy = 0.0, 1.0
+    try:
+        rect = poly.minimum_rotated_rectangle
+        coords = list(rect.exterior.coords)[:4]
+    except Exception:
+        coords = []
+    if len(coords) >= 4:
+        edges: list[tuple[float, tuple[float, float]]] = []
+        for p0, p1 in zip(coords, coords[1:] + coords[:1]):
+            dx = float(p1[0] - p0[0])
+            dy = float(p1[1] - p0[1])
+            length = math.hypot(dx, dy)
+            if length > 1e-9:
+                edges.append((length, (dx / length, dy / length)))
+        if edges:
+            edges.sort(key=lambda item: item[0], reverse=True)
+            ux, uy = edges[0][1]
+            vx, vy = -uy, ux
+    values_u: list[float] = []
+    values_v: list[float] = []
+    for x, y in list(poly.exterior.coords)[:-1]:
+        dx = float(x) - cx
+        dy = float(y) - cy
+        values_u.append(dx * ux + dy * uy)
+        values_v.append(dx * vx + dy * vy)
+    max_u = max(0.05, max((abs(v) for v in values_u), default=0.05))
+    max_v = max(0.05, max((abs(v) for v in values_v), default=0.05))
+    return (cx, cy), (ux, uy), (vx, vy), max_u, max_v
+
+
+def _roof_exterior_step(poly: Polygon, shape: str) -> float:
+    minx, miny, maxx, maxy = poly.bounds
+    span = max(maxx - minx, maxy - miny, 1.0)
+    short_span = max(min(maxx - minx, maxy - miny), 0.1)
+    if shape == "dome":
+        return max(0.25, span / 32.0)
+    return max(0.18, min(span / 8.0, short_span / 3.0))
+
+
+def _roof_sample_points(poly: Polygon, shape: str, axes: tuple[tuple[float, float], tuple[float, float], tuple[float, float], float, float]) -> list[tuple[float, float]]:
+    (cx, cy), (ux, uy), _, max_u, _ = axes
+    minx, miny, maxx, maxy = poly.bounds
+    points: list[tuple[float, float]] = _densify_ring_xy(poly.exterior.coords, _roof_exterior_step(poly, shape))[:-1]
+    points.append((cx, cy))
+    if shape == "gabled":
+        ridge_half = max_u * 0.55
+        for t in np.linspace(-ridge_half, ridge_half, 5):
+            point = Point(cx + ux * float(t), cy + uy * float(t))
+            if poly.buffer(1e-6).covers(point):
+                points.append((point.x, point.y))
+    if shape == "dome":
+        samples = 21
+        for ix in range(samples):
+            x = minx + (maxx - minx) * (ix + 0.5) / samples
+            for iy in range(samples):
+                y = miny + (maxy - miny) * (iy + 0.5) / samples
+                point = Point(x, y)
+                if poly.covers(point):
+                    points.append((float(x), float(y)))
+    return _dedupe_xy(points, precision=1e-4)
+
+
+def _roof_top_z_function(
+    poly: Polygon,
+    shape: str,
+    z_base: float,
+    z_top: float,
+    tags: dict[str, str] | None = None,
+) -> Callable[[float, float], float]:
+    (cx, cy), (ux, uy), (vx, vy), max_u, max_v = _roof_axes(poly)
+    roof_h = max(0.05, z_top - z_base)
+    boundary_tol = max(0.02, max(max_u, max_v) * 1e-4)
+    roof_direction = _parse_roof_direction(tags or {})
+    direction_bounds: tuple[float, float] | None = None
+    direction_vector: tuple[float, float] | None = None
+    if shape == "skillion" and roof_direction is not None:
+        direction_vector = _bearing_to_xy_vector(roof_direction)
+        projections = [float(x) * direction_vector[0] + float(y) * direction_vector[1] for x, y in poly.exterior.coords]
+        if projections:
+            min_projection = min(projections)
+            max_projection = max(projections)
+            if max_projection > min_projection + 1e-6:
+                direction_bounds = (min_projection, max_projection)
+    gabled_across = shape == "gabled" and _roof_orientation(tags or {}) == "across"
+
+    def normalized(x: float, y: float) -> tuple[float, float]:
+        dx = float(x) - cx
+        dy = float(y) - cy
+        return (dx * ux + dy * uy) / max_u, (dx * vx + dy * vy) / max_v
+
+    def top_z(x: float, y: float) -> float:
+        if direction_bounds is not None and direction_vector is not None:
+            projection = float(x) * direction_vector[0] + float(y) * direction_vector[1]
+            low, high = direction_bounds
+            factor = max(0.0, min(1.0, (projection - low) / (high - low)))
+            return z_base + roof_h * factor
+        u, v = normalized(x, y)
+        if shape == "skillion":
+            factor = max(0.0, min(1.0, (u + 1.0) / 2.0))
+            return z_base + roof_h * factor
+        if shape == "gabled":
+            factor = max(0.0, 1.0 - abs(u if gabled_across else v))
+            return z_base + roof_h * min(1.0, factor)
+        if poly.boundary.distance(Point(float(x), float(y))) <= boundary_tol:
+            return z_base
+        if shape == "dome":
+            r2 = u * u + v * v
+            factor = math.sqrt(max(0.0, 1.0 - min(1.0, r2)))
+            return z_base + roof_h * factor
+        factor = max(0.0, 1.0 - max(abs(u), abs(v)))
+        return z_base + roof_h * min(1.0, factor)
+
+    return top_z
+
+
+def _ring_points_without_close(ring: Iterable[tuple[float, float]]) -> list[tuple[float, float]]:
+    points: list[tuple[float, float]] = []
+    for x, y in ring:
+        point = (float(x), float(y))
+        if not points or math.hypot(point[0] - points[-1][0], point[1] - points[-1][1]) > 1e-6:
+            points.append(point)
+    if len(points) > 1 and math.hypot(points[0][0] - points[-1][0], points[0][1] - points[-1][1]) <= 1e-6:
+        points.pop()
+    return points
+
+
+def _remove_collinear_ring_points(points: list[tuple[float, float]], tolerance: float = 1e-7) -> list[tuple[float, float]]:
+    cleaned = list(points)
+    changed = True
+    while changed and len(cleaned) > 3:
+        changed = False
+        next_points: list[tuple[float, float]] = []
+        for index, point in enumerate(cleaned):
+            prev_point = cleaned[index - 1]
+            next_point = cleaned[(index + 1) % len(cleaned)]
+            v0 = (point[0] - prev_point[0], point[1] - prev_point[1])
+            v1 = (next_point[0] - point[0], next_point[1] - point[1])
+            cross = v0[0] * v1[1] - v0[1] * v1[0]
+            scale = max(1.0, math.hypot(*v0), math.hypot(*v1))
+            if abs(cross) <= tolerance * scale:
+                changed = True
+                continue
+            next_points.append(point)
+        cleaned = next_points
+    return cleaned
+
+
+def _is_convex_ring(points: list[tuple[float, float]]) -> bool:
+    if len(points) < 3:
+        return False
+    area = _signed_area(points + [points[0]])
+    if abs(area) <= 1e-9:
+        return False
+    expected = 1.0 if area > 0 else -1.0
+    for index, point in enumerate(points):
+        prev_point = points[index - 1]
+        next_point = points[(index + 1) % len(points)]
+        v0 = (point[0] - prev_point[0], point[1] - prev_point[1])
+        v1 = (next_point[0] - point[0], next_point[1] - point[1])
+        cross = v0[0] * v1[1] - v0[1] * v1[0]
+        if abs(cross) <= 1e-9:
+            continue
+        if cross * expected < -1e-9:
+            return False
+    return True
+
+
+def _long_edge_first(points: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    if len(points) != 4:
+        return points
+    edges = [
+        math.hypot(points[(index + 1) % 4][0] - points[index][0], points[(index + 1) % 4][1] - points[index][1])
+        for index in range(4)
+    ]
+    if min(edges, default=0.0) <= 1e-6:
+        return points
+    start = max(range(4), key=lambda index: edges[index])
+    return points[start:] + points[:start]
+
+
+def _roof_quad_frame(poly: Polygon, allow_rectangularize: bool = False) -> list[tuple[float, float]] | None:
+    points = _ring_points_without_close(poly.exterior.coords)
+    points = _remove_collinear_ring_points(points)
+    if len(points) == 4 and _is_convex_ring(points):
+        return _long_edge_first(points)
+    try:
+        rect = poly.minimum_rotated_rectangle
+        rect_coords = [(float(x), float(y)) for x, y in list(rect.exterior.coords)[:4]]
+        rect_area = abs(Polygon(rect_coords).area)
+    except Exception:
+        return None
+    if len(rect_coords) != 4 or rect_area <= 1e-9:
+        return None
+    ratio = poly.area / rect_area
+    threshold = 0.70 if allow_rectangularize and len(points) <= 8 else 0.90
+    if ratio < threshold:
+        return None
+    return _long_edge_first(rect_coords)
+
+
+def _parse_roof_direction(tags: dict[str, str]) -> float | None:
+    raw = str(tags.get("roof:direction") or tags.get("building:roof:direction") or "").strip().lower()
+    if not raw:
+        return None
+    directions = {
+        "n": 0.0,
+        "north": 0.0,
+        "ne": 45.0,
+        "northeast": 45.0,
+        "e": 90.0,
+        "east": 90.0,
+        "se": 135.0,
+        "southeast": 135.0,
+        "s": 180.0,
+        "south": 180.0,
+        "sw": 225.0,
+        "southwest": 225.0,
+        "w": 270.0,
+        "west": 270.0,
+        "nw": 315.0,
+        "northwest": 315.0,
+    }
+    if raw in directions:
+        return directions[raw]
+    match = re.search(r"[-+]?\d*\.?\d+", raw)
+    if not match:
+        return None
+    return float(match.group(0)) % 360.0
+
+
+def _roof_orientation(tags: dict[str, str]) -> str | None:
+    raw = str(tags.get("roof:orientation") or tags.get("building:roof:orientation") or "").strip().lower()
+    return raw if raw in {"along", "across"} else None
+
+
+def _bearing_to_xy_vector(bearing_degrees: float) -> tuple[float, float]:
+    radians = math.radians(float(bearing_degrees))
+    return math.sin(radians), math.cos(radians)
+
+
+def _rectangle_roof_frame(poly: Polygon) -> tuple[list[tuple[float, float]], float] | None:
+    try:
+        rect = poly.minimum_rotated_rectangle
+        coords = [(float(x), float(y)) for x, y in list(rect.exterior.coords)[:4]]
+    except Exception:
+        return None
+    if len(coords) != 4:
+        return None
+    try:
+        rect_area = abs(Polygon(coords).area)
+    except Exception:
+        return None
+    if rect_area <= 1e-9 or poly.area / rect_area < 0.90:
+        return None
+    edges = [
+        math.hypot(coords[(index + 1) % 4][0] - coords[index][0], coords[(index + 1) % 4][1] - coords[index][1])
+        for index in range(4)
+    ]
+    if min(edges, default=0.0) <= 1e-6:
+        return None
+    if edges[0] < edges[1]:
+        coords = [coords[1], coords[2], coords[3], coords[0]]
+        edges = edges[1:] + edges[:1]
+    return coords, max(edges)
+
+
+def _quad_faces(a: int, b: int, c: int, d: int) -> list[tuple[int, int, int]]:
+    return [(a, b, c), (a, c, d)]
+
+
+def _build_rectangular_roof_mesh(
+    poly: Polygon,
+    z_base: float,
+    z_top: float,
+    shape: str,
+    name: str,
+    color: tuple[int, int, int, int],
+    include_bottom: bool,
+    tags: dict[str, str] | None = None,
+) -> MeshPart:
+    tags = tags or {}
+    direction = _parse_roof_direction(tags)
+    coords = _roof_quad_frame(poly, allow_rectangularize=shape == "skillion" and direction is not None)
+    if coords is None:
+        return MeshPart(name, np.zeros((0, 3)), np.zeros((0, 3), dtype=np.int64), color)
+    a, b, c, d = coords
+    vertices: list[tuple[float, float, float]] = []
+    faces: list[tuple[int, int, int]] = []
+    cache: VertexCache = {}
+
+    a0 = _vertex_id(vertices, cache, a[0], a[1], z_base)
+    b0 = _vertex_id(vertices, cache, b[0], b[1], z_base)
+    c0 = _vertex_id(vertices, cache, c[0], c[1], z_base)
+    d0 = _vertex_id(vertices, cache, d[0], d[1], z_base)
+    if include_bottom:
+        faces.extend([(a0, d0, c0), (a0, c0, b0)])
+
+    if shape == "skillion":
+        if direction is not None:
+            dx, dy = _bearing_to_xy_vector(direction)
+            projections = [point[0] * dx + point[1] * dy for point in coords]
+            low = min(projections)
+            high = max(projections)
+            if high > low + 1e-6:
+                top_z = [z_base + (z_top - z_base) * max(0.0, min(1.0, (value - low) / (high - low))) for value in projections]
+            else:
+                top_z = [z_base, z_top, z_top, z_base]
+        else:
+            top_z = [z_base, z_top, z_top, z_base]
+        bottom = [a0, b0, c0, d0]
+        top = [
+            _vertex_id(vertices, cache, point[0], point[1], z)
+            for point, z in zip(coords, top_z)
+        ]
+        faces.extend(_quad_faces(top[0], top[1], top[2], top[3]))
+        for index in range(4):
+            next_index = (index + 1) % 4
+            b0_edge = bottom[index]
+            b1_edge = bottom[next_index]
+            t0_edge = top[index]
+            t1_edge = top[next_index]
+            if t0_edge == b0_edge and t1_edge == b1_edge:
+                continue
+            if t0_edge == b0_edge:
+                faces.append((b0_edge, t1_edge, b1_edge))
+            elif t1_edge == b1_edge:
+                faces.append((b0_edge, t0_edge, b1_edge))
+            else:
+                faces.extend(_quad_faces(b0_edge, b1_edge, t1_edge, t0_edge))
+    elif shape == "gabled":
+        if _roof_orientation(tags or {}) == "across":
+            r0 = ((a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0)
+            r1 = ((d[0] + c[0]) / 2.0, (d[1] + c[1]) / 2.0)
+            r0t = _vertex_id(vertices, cache, r0[0], r0[1], z_top)
+            r1t = _vertex_id(vertices, cache, r1[0], r1[1], z_top)
+            faces.extend([(a0, d0, r1t), (a0, r1t, r0t)])
+            faces.extend([(b0, r0t, r1t), (b0, r1t, c0)])
+            faces.append((a0, r0t, b0))
+            faces.append((d0, c0, r1t))
+        else:
+            r0 = ((a[0] + d[0]) / 2.0, (a[1] + d[1]) / 2.0)
+            r1 = ((b[0] + c[0]) / 2.0, (b[1] + c[1]) / 2.0)
+            r0t = _vertex_id(vertices, cache, r0[0], r0[1], z_top)
+            r1t = _vertex_id(vertices, cache, r1[0], r1[1], z_top)
+            faces.extend([(a0, b0, r1t), (a0, r1t, r0t)])
+            faces.extend([(d0, r0t, r1t), (d0, r1t, c0)])
+            faces.append((a0, r0t, d0))
+            faces.append((b0, c0, r1t))
+    else:
+        center = poly.representative_point()
+        apex = _vertex_id(vertices, cache, float(center.x), float(center.y), z_top)
+        faces.extend([(a0, b0, apex), (b0, c0, apex), (c0, d0, apex), (d0, a0, apex)])
+
+    if not faces:
+        return MeshPart(name, np.zeros((0, 3)), np.zeros((0, 3), dtype=np.int64), color)
+    return MeshPart(name, np.asarray(vertices, dtype=float), np.asarray(faces, dtype=np.int64), color).cleaned()
+
+
+def _ray_boundary_point(poly: Polygon, cx: float, cy: float, angle: float) -> tuple[float, float] | None:
+    minx, miny, maxx, maxy = poly.bounds
+    radius = max(maxx - minx, maxy - miny, 1.0) * 2.5
+    dx = math.cos(angle)
+    dy = math.sin(angle)
+    ray = LineString([(cx, cy), (cx + dx * radius, cy + dy * radius)])
+    try:
+        intersection = poly.boundary.intersection(ray)
+    except Exception:
+        return None
+    points: list[Point] = []
+    if isinstance(intersection, Point):
+        points = [intersection]
+    elif isinstance(intersection, MultiPoint):
+        points = list(intersection.geoms)
+    elif isinstance(intersection, (LineString, MultiLineString, GeometryCollection)):
+        for geom in getattr(intersection, "geoms", [intersection]):
+            if isinstance(geom, Point):
+                points.append(geom)
+            elif isinstance(geom, LineString):
+                coords = list(geom.coords)
+                if coords:
+                    points.extend(Point(float(x), float(y)) for x, y in (coords[0], coords[-1]))
+    if not points:
+        return None
+    point = max(points, key=lambda p: (float(p.x) - cx) * dx + (float(p.y) - cy) * dy)
+    return float(point.x), float(point.y)
+
+
+def _build_dome_roof_mesh(
+    poly: Polygon,
+    z_base: float,
+    z_top: float,
+    name: str,
+    color: tuple[int, int, int, int],
+    include_bottom: bool,
+) -> MeshPart:
+    center = poly.representative_point()
+    cx = float(center.x)
+    cy = float(center.y)
+    angle_count = 96
+    ring_count = 32
+    boundary: list[tuple[float, float]] = []
+    for index in range(angle_count):
+        point = _ray_boundary_point(poly, cx, cy, math.tau * index / angle_count)
+        if point is None:
+            return MeshPart(name, np.zeros((0, 3)), np.zeros((0, 3), dtype=np.int64), color)
+        boundary.append(point)
+
+    vertices: list[tuple[float, float, float]] = []
+    faces: list[tuple[int, int, int]] = []
+    cache: VertexCache = {}
+    top_center = _vertex_id(vertices, cache, cx, cy, z_top)
+    bottom_center = _vertex_id(vertices, cache, cx, cy, z_base)
+    rings: list[list[int]] = []
+    for ring in range(1, ring_count + 1):
+        fraction = ring / ring_count
+        z = z_base + (z_top - z_base) * math.sqrt(max(0.0, 1.0 - fraction * fraction))
+        ring_vertices: list[int] = []
+        for bx, by in boundary:
+            x = cx + (bx - cx) * fraction
+            y = cy + (by - cy) * fraction
+            ring_vertices.append(_vertex_id(vertices, cache, x, y, z))
+        rings.append(ring_vertices)
+
+    first = rings[0]
+    for index in range(angle_count):
+        faces.append((top_center, first[index], first[(index + 1) % angle_count]))
+    for ring_index in range(len(rings) - 1):
+        inner = rings[ring_index]
+        outer = rings[ring_index + 1]
+        for index in range(angle_count):
+            a = inner[index]
+            b = inner[(index + 1) % angle_count]
+            c = outer[(index + 1) % angle_count]
+            d = outer[index]
+            faces.extend(_quad_faces(a, d, c, b))
+    if include_bottom:
+        outer = rings[-1]
+        for index in range(angle_count):
+            faces.append((bottom_center, outer[(index + 1) % angle_count], outer[index]))
+
+    return MeshPart(name, np.asarray(vertices, dtype=float), np.asarray(faces, dtype=np.int64), color).cleaned()
+
+
+def _has_bad_mesh_edges(part: MeshPart) -> bool:
+    part = part.cleaned()
+    if part.is_empty():
+        return True
+    faces = np.asarray(part.faces, dtype=np.int64)
+    if faces.size == 0:
+        return True
+    edges = np.vstack([
+        faces[:, [0, 1]],
+        faces[:, [1, 2]],
+        faces[:, [2, 0]],
+    ])
+    edges.sort(axis=1)
+    _, counts = np.unique(edges, axis=0, return_counts=True)
+    return bool(np.any(counts != 2))
+
+
+def _add_variable_roof_triangle(
+    vertices: list[tuple[float, float, float]],
+    faces: list[tuple[int, int, int]],
+    cache: VertexCache,
+    coords: list[tuple[float, float]],
+    z_base: float,
+    top_z_at: Callable[[float, float], float],
+    include_bottom: bool = True,
+) -> None:
+    if len(coords) < 3:
+        return
+    tri = coords[:3]
+    area = _signed_area(tri + [tri[0]])
+    if abs(area) <= 1e-12:
+        return
+    top_z = [max(z_base, top_z_at(x, y)) for x, y in tri]
+    bottom_idx = [_vertex_id(vertices, cache, x, y, z_base) for x, y in tri]
+    if include_bottom:
+        if area >= 0:
+            faces.append((bottom_idx[0], bottom_idx[2], bottom_idx[1]))
+        else:
+            faces.append((bottom_idx[0], bottom_idx[1], bottom_idx[2]))
+    top_idx = [_vertex_id(vertices, cache, x, y, z) for (x, y), z in zip(tri, top_z)]
+    if area >= 0:
+        top_face = (top_idx[0], top_idx[1], top_idx[2])
+    else:
+        top_face = (top_idx[0], top_idx[2], top_idx[1])
+    faces.append(top_face)
+
+
+def _add_roof_exterior_sides(
+    vertices: list[tuple[float, float, float]],
+    faces: list[tuple[int, int, int]],
+    cache: VertexCache,
+    poly: Polygon,
+    shape: str,
+    z_base: float,
+    top_z_at: Callable[[float, float], float],
+) -> None:
+    exterior = _densify_ring_xy(poly.exterior.coords, _roof_exterior_step(poly, shape))
+    if len(exterior) < 2:
+        return
+
+    for p0, p1 in zip(exterior, exterior[1:]):
+        x0, y0 = float(p0[0]), float(p0[1])
+        x1, y1 = float(p1[0]), float(p1[1])
+        z0 = max(z_base, top_z_at(x0, y0))
+        z1 = max(z_base, top_z_at(x1, y1))
+        if max(z0, z1) - z_base <= 1e-5:
+            continue
+        top0 = _vertex_id(vertices, cache, x0, y0, z0)
+        top1 = _vertex_id(vertices, cache, x1, y1, z1)
+        bottom0 = _vertex_id(vertices, cache, x0, y0, z_base)
+        bottom1 = _vertex_id(vertices, cache, x1, y1, z_base)
+        top0_is_base = top0 == bottom0
+        top1_is_base = top1 == bottom1
+        if top0_is_base and top1_is_base:
+            continue
+        if top0_is_base:
+            faces.append((top0, top1, bottom1))
+        elif top1_is_base:
+            faces.append((top0, top1, bottom0))
+        else:
+            faces.append((top0, top1, bottom1))
+            faces.append((top0, bottom1, bottom0))
+
+
+def build_osm_roof_mesh(
+    poly: Polygon,
+    z_base: float,
+    z_top: float,
+    shape: str,
+    name: str,
+    color: tuple[int, int, int, int],
+    include_bottom: bool = True,
+    tags: dict[str, str] | None = None,
+) -> MeshPart:
+    poly = _clean_polygon(poly)  # type: ignore[assignment]
+    if poly is None or poly.interiors or z_top <= z_base + 0.05:
+        return MeshPart(name, np.zeros((0, 3)), np.zeros((0, 3), dtype=np.int64), color)
+    if shape == "dome":
+        dome = _build_dome_roof_mesh(poly, z_base, z_top, name, color, include_bottom)
+        if not dome.is_empty():
+            return dome
+    if shape in {"gabled", "skillion", "hipped", "pyramidal"}:
+        rectangular = _build_rectangular_roof_mesh(poly, z_base, z_top, shape, name, color, include_bottom, tags)
+        if not rectangular.is_empty():
+            return rectangular
+    axes = _roof_axes(poly)
+    points = _roof_sample_points(poly, shape, axes)
+    if len(points) < 3:
+        return MeshPart(name, np.zeros((0, 3)), np.zeros((0, 3), dtype=np.int64), color)
+    try:
+        candidates = triangulate(MultiPoint(points))
+    except Exception:
+        candidates = []
+    if not candidates:
+        candidates = _triangulate_polygon(poly)
+    top_z_at = _roof_top_z_function(poly, shape, z_base, z_top, tags)
+
+    vertices: list[tuple[float, float, float]] = []
+    faces: list[tuple[int, int, int]] = []
+    cache: VertexCache = {}
+    for candidate in candidates:
+        if candidate.is_empty or candidate.area <= 1e-9:
+            continue
+        try:
+            clipped = candidate.intersection(poly)
+        except Exception:
+            continue
+        for piece in iter_polygons(clipped):
+            for tri in _triangulate_polygon(piece):
+                coords = [(float(x), float(y)) for x, y in list(tri.exterior.coords)[:3]]
+                _add_variable_roof_triangle(
+                    vertices,
+                    faces,
+                    cache,
+                    coords,
+                    z_base,
+                    top_z_at,
+                    include_bottom=include_bottom,
+                )
+
+    _add_roof_exterior_sides(vertices, faces, cache, poly, shape, z_base, top_z_at)
+    if not faces:
+        return MeshPart(name, np.zeros((0, 3)), np.zeros((0, 3), dtype=np.int64), color)
+    return MeshPart(name, np.asarray(vertices, dtype=float), np.asarray(faces, dtype=np.int64), color).cleaned()
+
+
+def extrude_building_with_osm_roof_on_terrain(
+    poly: Polygon,
+    terrain: TerrainGrid,
+    height_mm: float,
+    roof_height_mm: float,
+    roof_shape: str,
+    name: str,
+    color: tuple[int, int, int, int],
+    min_height_mm: float = 0.0,
+    tags: dict[str, str] | None = None,
+) -> MeshPart:
+    roof_height_mm = max(0.05, min(float(roof_height_mm), max(0.05, height_mm * 0.85)))
+    body_height_mm = max(0.05, height_mm - roof_height_mm)
+    roof_base_z = _building_top_z_for_height(poly, terrain, body_height_mm, min_height_mm)
+    roof_top_z = max(_building_top_z_for_height(poly, terrain, height_mm, min_height_mm), roof_base_z + 0.05)
+    parts: list[MeshPart] = []
+    has_body = body_height_mm > min_height_mm + 0.05
+    if has_body:
+        body = extrude_building_on_terrain(poly, terrain, body_height_mm, name, color, min_height_mm)
+        if not body.is_empty():
+            parts.append(body)
+    roof = build_osm_roof_mesh(poly, roof_base_z, roof_top_z, roof_shape, name, color, include_bottom=True, tags=tags)
+    if _has_bad_mesh_edges(roof):
+        return extrude_building_on_terrain(poly, terrain, height_mm, name, color, min_height_mm)
+    if not roof.is_empty():
+        parts.append(roof)
+    if not parts:
+        return extrude_building_on_terrain(poly, terrain, height_mm, name, color, min_height_mm)
+    return merge_parts(name, parts, color)
+
+
+def _extrude_monument_on_terrain(
+    poly: Polygon,
+    terrain: TerrainGrid,
+    height_mm: float,
+    name: str,
+    color: tuple[int, int, int, int],
+    min_height_mm: float = 0.0,
+) -> MeshPart:
+    point = poly.representative_point()
+    z0 = terrain.sample_z(point.x, point.y) + max(0.0, min_height_mm)
+    height_mm = max(height_mm, 1.0)
+    lower_base_top = z0 + max(0.18, height_mm * 0.08)
+    upper_base_top = z0 + max(lower_base_top - z0 + 0.15, height_mm * 0.16)
+    pedestal_top = z0 + max(upper_base_top - z0 + 0.15, height_mm * 0.26)
+    shaft_top = z0 + max(pedestal_top - z0 + 0.25, height_mm * 0.93)
+    top_z = z0 + height_mm
+
+    layers: list[MeshPart] = [extrude_polygon(poly, z0, min(lower_base_top, top_z), name, color)]
+    upper_base_poly = _scaled_building_poly(poly, 0.78)
+    pedestal_poly = _oriented_rectangle_part(poly, 0.52, 0.46)
+    shaft_poly = _oriented_rectangle_part(poly, 0.34, 0.24)
+    cap_poly = _oriented_rectangle_part(poly, 0.26, 0.18)
+    if upper_base_poly is not None and upper_base_top > lower_base_top + 0.05:
+        layers.append(extrude_polygon(upper_base_poly, lower_base_top, min(upper_base_top, top_z), name, color))
+    if pedestal_poly is not None and pedestal_top > upper_base_top + 0.05:
+        layers.append(extrude_polygon(pedestal_poly, upper_base_top, min(pedestal_top, top_z), name, color))
+    if shaft_poly is not None and shaft_top > pedestal_top + 0.05:
+        layers.append(extrude_polygon(shaft_poly, pedestal_top, min(shaft_top, top_z), name, color))
+    if cap_poly is not None and top_z > shaft_top + 0.05:
+        layers.append(extrude_polygon(cap_poly, shaft_top, top_z, name, color))
+    return merge_parts(name, layers, color)
+
+
 def build_building_meshes(features: list[OSMFeature], scaler: ModelScaler, terrain: TerrainGrid, params: ModelParams) -> MeshPart:
     parts: list[MeshPart] = []
     tol_m = scaler.length_mm_to_m(params.simplify_tolerance_mm)
-    for feature in features:
+    high_detail = _is_high_detail_mode(params)
+    for feature in _select_building_features_for_detail(features, params):
         if feature.tags.get("underground") == "yes" or feature.tags.get("location") == "underground":
             continue
         for poly_m in iter_polygons(feature.geometry_m):
@@ -804,9 +1690,37 @@ def build_building_meshes(features: list[OSMFeature], scaler: ModelScaler, terra
             if poly is None:
                 continue
             h_m = parse_height_m(feature.tags, params)
+            min_h_m = parse_min_height_m(feature.tags, params) if high_detail else 0.0
+            if min_h_m >= h_m:
+                h_m = min_h_m + max(1.0, params.level_height_m)
             h_mm = h_m * scaler.scale_mm_per_m * params.building_height_multiplier
             h_mm = float(np.clip(h_mm, params.min_building_height_mm, params.max_building_height_mm))
-            parts.append(extrude_building_on_terrain(poly, terrain, h_mm, "building", COLORS["buildings"]))
+            min_h_mm = min_h_m * scaler.scale_mm_per_m * params.building_height_multiplier
+            min_h_mm = float(max(0.0, min(min_h_mm, h_mm - 0.05)))
+            roof_shape = _printable_roof_shape_from_tags(feature.tags) if high_detail else None
+            roof_h_m = parse_roof_height_m(feature.tags, params, h_m) if roof_shape else None
+            roof_h_mm = (
+                roof_h_m * scaler.scale_mm_per_m * params.building_height_multiplier
+                if roof_h_m is not None
+                else h_mm * (0.42 if roof_shape == "dome" else 0.25)
+            )
+            roof_h_mm = float(max(0.08, min(roof_h_mm, max(0.08, h_mm * 0.85))))
+            if high_detail and roof_shape:
+                parts.append(extrude_building_with_osm_roof_on_terrain(
+                    poly,
+                    terrain,
+                    h_mm,
+                    roof_h_mm,
+                    roof_shape,
+                    "building",
+                    COLORS["buildings"],
+                    min_h_mm,
+                    feature.tags,
+                ))
+            elif high_detail and _is_monument_feature(feature.tags):
+                parts.append(_extrude_monument_on_terrain(poly, terrain, h_mm, "building", COLORS["buildings"], min_h_mm))
+            else:
+                parts.append(extrude_building_on_terrain(poly, terrain, h_mm, "building", COLORS["buildings"], min_h_mm))
     return merge_parts("buildings", parts, COLORS["buildings"])
 
 
@@ -1065,6 +1979,93 @@ def build_route_meshes(
     return merge_parts("route", parts, COLORS["route"])
 
 
+def railway_width_m(tags: dict[str, str]) -> float:
+    if "width" in tags:
+        value = parse_length_m(tags["width"], min_m=0.5, max_m=40.0)
+        if value is not None:
+            return value
+    railway = tags.get("railway", "")
+    widths = {
+        "rail": 5.0,
+        "narrow_gauge": 3.2,
+        "light_rail": 3.2,
+        "tram": 2.6,
+        "monorail": 3.0,
+        "subway": 3.0,
+    }
+    return widths.get(railway, 3.0)
+
+
+def rail_width_mm(tags: dict[str, str], scaler: ModelScaler, min_width_mm: float) -> float:
+    return max(scaler.length_m_to_mm(railway_width_m(tags)), min_width_mm)
+
+
+def build_rail_meshes(
+    features: list[OSMFeature],
+    scaler: ModelScaler,
+    terrain: TerrainGrid,
+    params: ModelParams,
+    name: str,
+    color: tuple[int, int, int, int],
+    min_width_mm: float,
+    thickness_mm: float,
+    z_offset_mm: float,
+    water_union_m: BaseGeometry | None = None,
+) -> MeshPart:
+    parts: list[MeshPart] = []
+    tol_m = scaler.length_mm_to_m(max(params.simplify_tolerance_mm, 0.10))
+    for feature in features:
+        for line_m in iter_lines(feature.geometry_m):
+            if tol_m > 0:
+                line_m = line_m.simplify(tol_m, preserve_topology=False)
+            coords_m = list(line_m.coords)
+            if len(coords_m) < 2:
+                continue
+            if _terrain_has_relief(terrain):
+                max_step_m = scaler.length_mm_to_m(_terrain_spacing_mm(terrain) * 1.2)
+                coords_m = _densify_line_coords_m(coords_m, max(max_step_m, 1.0))
+            coords_mm = [scaler.xy_to_mm(float(x), float(y)) for x, y in coords_m]
+            width_mm = rail_width_mm(feature.tags, scaler, min_width_mm)
+            for m0, m1, p0, p1 in zip(coords_m, coords_m[1:], coords_mm, coords_mm[1:]):
+                segment_m = LineString([m0, m1])
+                elevated = params.bridge_clearance_mm if (
+                    params.cut_out_water and not is_tunnel(feature.tags) and _crosses_water_cutout(segment_m, water_union_m)
+                ) else 0.0
+                parts.append(_road_segment_part(
+                    p0,
+                    p1,
+                    width_mm,
+                    terrain,
+                    thickness_mm=thickness_mm,
+                    z_offset_mm=z_offset_mm,
+                    bridge_offset_mm=elevated,
+                    name=name,
+                    color=color,
+                ))
+    return merge_parts(name, parts, color)
+
+
+def station_polygons_m(features: list[OSMFeature], scaler: ModelScaler, marker_radius_mm: float) -> list[Polygon]:
+    polygons: list[Polygon] = []
+    marker_radius_m = scaler.length_mm_to_m(max(marker_radius_mm, 0.30))
+    for feature in features:
+        feature_polys = list(iter_polygons(feature.geometry_m))
+        if feature_polys:
+            polygons.extend(feature_polys)
+            continue
+        for line in iter_lines(feature.geometry_m):
+            try:
+                polygons.extend(list(iter_polygons(line.buffer(marker_radius_m, cap_style=1, join_style=1))))
+            except Exception:
+                continue
+        for point in iter_points(feature.geometry_m):
+            try:
+                polygons.extend(list(iter_polygons(point.buffer(marker_radius_m, quad_segs=8))))
+            except Exception:
+                continue
+    return polygons
+
+
 def water_line_width_m(tags: dict[str, str]) -> float:
     waterway = tags.get("waterway", "")
     widths = {"river": 12.0, "canal": 8.0, "stream": 2.5, "ditch": 1.8, "drain": 1.5}
@@ -1266,8 +2267,16 @@ def build_surface_layer_meshes(
     scaler: ModelScaler,
     terrain: TerrainGrid,
     params: ModelParams,
+    rail_line_features: list[OSMFeature] | None = None,
+    rail_station_features: list[OSMFeature] | None = None,
+    subway_line_features: list[OSMFeature] | None = None,
+    subway_station_features: list[OSMFeature] | None = None,
 ) -> list[MeshPart]:
     parts: list[MeshPart] = []
+    rail_line_features = rail_line_features or []
+    rail_station_features = rail_station_features or []
+    subway_line_features = subway_line_features or []
+    subway_station_features = subway_station_features or []
 
     water_polys = _feature_polygons(water_features) + _buffer_feature_lines(water_features, scaler, params, "water")
     green_polys = _feature_polygons(green_features)
@@ -1358,5 +2367,56 @@ def build_surface_layer_meshes(
         parts.append(make_layer_mesh("water", list(iter_polygons(water_union)) if water_union else [], scaler, terrain, params, thickness_mm=0.35, z_offset_mm=0.08, color=COLORS["water"], simplify_tolerance_mm=surface_tol_mm))
     if params.include_roads:
         parts.append(build_road_meshes(road_features, scaler, terrain, params, water_union if params.cut_out_water else None))
+    rail_water_union = water_union if params.cut_out_water else None
+    if params.include_rail_lines:
+        parts.append(build_rail_meshes(
+            rail_line_features,
+            scaler,
+            terrain,
+            params,
+            name="rail_lines",
+            color=COLORS["rail_lines"],
+            min_width_mm=0.45,
+            thickness_mm=0.36,
+            z_offset_mm=0.18,
+            water_union_m=rail_water_union,
+        ))
+    if params.include_subway_lines:
+        parts.append(build_rail_meshes(
+            subway_line_features,
+            scaler,
+            terrain,
+            params,
+            name="subway_lines",
+            color=COLORS["subway_lines"],
+            min_width_mm=0.38,
+            thickness_mm=0.32,
+            z_offset_mm=0.22,
+            water_union_m=rail_water_union,
+        ))
+    if params.include_rail_stations:
+        parts.append(make_layer_mesh(
+            "rail_stations",
+            station_polygons_m(rail_station_features, scaler, marker_radius_mm=1.15),
+            scaler,
+            terrain,
+            params,
+            thickness_mm=0.55,
+            z_offset_mm=0.24,
+            color=COLORS["rail_stations"],
+            simplify_tolerance_mm=surface_tol_mm,
+        ))
+    if params.include_subway_stations:
+        parts.append(make_layer_mesh(
+            "subway_stations",
+            station_polygons_m(subway_station_features, scaler, marker_radius_mm=0.95),
+            scaler,
+            terrain,
+            params,
+            thickness_mm=0.50,
+            z_offset_mm=0.28,
+            color=COLORS["subway_stations"],
+            simplify_tolerance_mm=surface_tol_mm,
+        ))
 
     return parts

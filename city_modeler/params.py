@@ -22,6 +22,7 @@ ROAD_LEVELS = [
 ]
 SELECTION_SHAPES = ["rectangle", "circle", "hexagon"]
 AREA_INFILL_MODES = ["empty_areas", "all_areas"]
+MODEL_DETAIL_MODES = ["normal", "high"]
 DEFAULT_ROAD_LEVELS = [
     "motorway",
     "trunk",
@@ -119,6 +120,7 @@ class ModelParams:
     chunk_rows: int = 1
     chunk_cols: int = 1
     auto_repair_mesh: bool = True
+    export_print_color_groups: bool = True
 
     include_buildings: bool = True
     include_roads: bool = True
@@ -128,6 +130,10 @@ class ModelParams:
     include_airport: bool = True
     include_area_infill: bool = True
     include_route: bool = False
+    include_rail_lines: bool = False
+    include_rail_stations: bool = False
+    include_subway_lines: bool = False
+    include_subway_stations: bool = False
 
     osm_overpass_url: str = "https://overpass-api.de/api/interpreter"
     road_levels: list[str] = field(default_factory=lambda: list(DEFAULT_ROAD_LEVELS))
@@ -135,6 +141,7 @@ class ModelParams:
     project_name: str = "TopoTile Studio / 3D地图工坊 City Tile"
     output_name: str = "city_model"
     area_infill_mode: str = "empty_areas"
+    model_detail_mode: str = "normal"
     route_name: str = ""
     route_segments: list[list[list[float]]] = field(default_factory=list)
 
@@ -151,6 +158,8 @@ class ModelParams:
 
         values = dict(data)
         values.pop("bbox", None)
+        if "export_print_color_groups" not in values and "random_export_colors" in values:
+            values["export_print_color_groups"] = values["random_export_colors"]
         values.update({"south": south, "west": west, "north": north, "east": east})
 
         valid = {field.name for field in cls.__dataclass_fields__.values()}  # type: ignore[attr-defined]
@@ -168,8 +177,10 @@ class ModelParams:
         int_fields = {"terrain_grid_size", "terrain_tile_zoom", "road_cleaning_level", "chunk_rows", "chunk_cols"}
         bool_fields = {
             "auto_terrain", "large_map_mode", "cut_out_water", "chunk_export", "auto_repair_mesh",
+            "export_print_color_groups",
             "include_buildings", "include_roads", "include_water", "include_green", "include_parking",
-            "include_airport", "include_area_infill", "include_route"
+            "include_airport", "include_area_infill", "include_route",
+            "include_rail_lines", "include_rail_stations", "include_subway_lines", "include_subway_stations"
         }
 
         for key in numeric_fields & filtered.keys():
@@ -186,6 +197,8 @@ class ModelParams:
             filtered["selection_shape"] = str(filtered["selection_shape"]).strip().lower()
         if "area_infill_mode" in filtered:
             filtered["area_infill_mode"] = str(filtered["area_infill_mode"]).strip().lower()
+        if "model_detail_mode" in filtered:
+            filtered["model_detail_mode"] = str(filtered["model_detail_mode"]).strip().lower()
         if "road_levels" in filtered:
             value = filtered["road_levels"]
             if isinstance(value, str):
@@ -234,6 +247,8 @@ class ModelParams:
             raise ValueError(f"selection_shape must be one of: {', '.join(SELECTION_SHAPES)}")
         if self.area_infill_mode not in AREA_INFILL_MODES:
             raise ValueError(f"area_infill_mode must be one of: {', '.join(AREA_INFILL_MODES)}")
+        if self.model_detail_mode not in MODEL_DETAIL_MODES:
+            raise ValueError(f"model_detail_mode must be one of: {', '.join(MODEL_DETAIL_MODES)}")
         if self.road_cleaning_level < 0 or self.road_cleaning_level > 3:
             raise ValueError("road_cleaning_level must be between 0 and 3.")
         if self.chunk_rows < 1 or self.chunk_rows > 6:

@@ -6,7 +6,7 @@ from shapely.ops import unary_union
 
 from city_modeler.dem import TerrainGrid
 from city_modeler.geo import ModelScaler
-from city_modeler.mesh_ops import build_building_meshes, build_road_meshes, build_route_meshes, build_surface_layer_meshes, extrude_polygon, is_bridge, road_width_m, road_width_mm, terrain_to_mesh
+from city_modeler.mesh_ops import build_building_meshes, build_osm_roof_mesh, build_road_meshes, build_route_meshes, build_surface_layer_meshes, COLORS, extrude_polygon, is_bridge, road_width_m, road_width_mm, terrain_to_mesh
 from city_modeler.mesh_repair import mesh_diagnostics
 from city_modeler.osm import OSMFeature
 from city_modeler.params import ModelParams
@@ -79,6 +79,73 @@ def test_airport_layer_uses_parking_thickness_for_runway_lines():
     assert math.isclose(float(airport.vertices[:, 2].max()), 3.26, abs_tol=1e-6)
 
 
+def test_rail_and_subway_layers_generate_optional_parts():
+    params = ModelParams(
+        south=0.0,
+        west=0.0,
+        north=0.01,
+        east=0.01,
+        include_rail_lines=True,
+        include_rail_stations=True,
+        include_subway_lines=True,
+        include_subway_stations=True,
+    )
+    scaler = ModelScaler(scale_mm_per_m=1.0, width_mm=80.0, height_mm=80.0)
+    terrain = TerrainGrid(
+        x_mm=np.asarray([[0.0, 80.0], [0.0, 80.0]]),
+        y_mm=np.asarray([[0.0, 0.0], [80.0, 80.0]]),
+        z_mm=np.full((2, 2), 3.0),
+    )
+    rail_line = OSMFeature(
+        layer="rail_line",
+        geometry_m=LineString([(10.0, 20.0), (70.0, 20.0)]),
+        tags={"railway": "rail"},
+        osm_id="way/rail",
+    )
+    subway_line = OSMFeature(
+        layer="subway_line",
+        geometry_m=LineString([(10.0, 30.0), (70.0, 30.0)]),
+        tags={"railway": "subway", "tunnel": "yes"},
+        osm_id="way/subway",
+    )
+    rail_station = OSMFeature(
+        layer="rail_station",
+        geometry_m=Point(20.0, 20.0),
+        tags={"railway": "station"},
+        osm_id="node/rail-station",
+    )
+    subway_station = OSMFeature(
+        layer="subway_station",
+        geometry_m=Point(40.0, 30.0),
+        tags={"railway": "station", "station": "subway"},
+        osm_id="node/subway-station",
+    )
+
+    parts = build_surface_layer_meshes(
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        scaler,
+        terrain,
+        params,
+        rail_line_features=[rail_line],
+        rail_station_features=[rail_station],
+        subway_line_features=[subway_line],
+        subway_station_features=[subway_station],
+    )
+    by_name = {part.name: part for part in parts}
+
+    assert {"rail_lines", "rail_stations", "subway_lines", "subway_stations"} <= set(by_name)
+    assert not by_name["rail_lines"].is_empty()
+    assert not by_name["rail_stations"].is_empty()
+    assert not by_name["subway_lines"].is_empty()
+    assert not by_name["subway_stations"].is_empty()
+
+
 def test_green_surface_follows_terrain_relief():
     params = ModelParams(south=0.0, west=0.0, north=0.01, east=0.01)
     scaler = ModelScaler(scale_mm_per_m=1.0, width_mm=40.0, height_mm=40.0)
@@ -128,6 +195,272 @@ def test_building_bottom_follows_terrain_but_roof_stays_flat():
     assert np.allclose(building.vertices[np.isclose(building.vertices[:, 2], top_z), 2], top_z)
     assert top_z < float(bottom_z.max()) + params.default_building_height_m + 1.1
     assert mesh_diagnostics(building)["non_manifold_edges"] == 0
+
+
+def test_high_detail_building_parts_replace_parent_block():
+    scaler = ModelScaler(scale_mm_per_m=1.0, width_mm=50.0, height_mm=50.0)
+    terrain = TerrainGrid(
+        x_mm=np.asarray([[0.0, 50.0], [0.0, 50.0]]),
+        y_mm=np.asarray([[0.0, 0.0], [50.0, 50.0]]),
+        z_mm=np.full((2, 2), 3.0),
+    )
+    parent = OSMFeature(
+        layer="building",
+        geometry_m=Polygon([(0.0, 0.0), (30.0, 0.0), (30.0, 30.0), (0.0, 30.0)]),
+        tags={"building": "yes", "height": "20"},
+        osm_id="way/parent",
+    )
+    part = OSMFeature(
+        layer="building",
+        geometry_m=Polygon([(5.0, 5.0), (15.0, 5.0), (15.0, 15.0), (5.0, 15.0)]),
+        tags={"building:part": "yes", "height": "6"},
+        osm_id="way/part",
+    )
+
+    normal = build_building_meshes(
+        [parent, part],
+        scaler,
+        terrain,
+        ModelParams(south=0.0, west=0.0, north=0.01, east=0.01),
+    )
+    high = build_building_meshes(
+        [parent, part],
+        scaler,
+        terrain,
+        ModelParams(south=0.0, west=0.0, north=0.01, east=0.01, model_detail_mode="high"),
+    )
+
+    assert float(normal.vertices[:, 2].max()) > 20.0
+    assert math.isclose(float(high.vertices[:, 2].max()), 9.0, abs_tol=1e-6)
+
+
+def test_high_detail_building_part_respects_min_height():
+    scaler = ModelScaler(scale_mm_per_m=1.0, width_mm=40.0, height_mm=40.0)
+    terrain = TerrainGrid(
+        x_mm=np.asarray([[0.0, 40.0], [0.0, 40.0]]),
+        y_mm=np.asarray([[0.0, 0.0], [40.0, 40.0]]),
+        z_mm=np.full((2, 2), 3.0),
+    )
+    part = OSMFeature(
+        layer="building",
+        geometry_m=Polygon([(5.0, 5.0), (20.0, 5.0), (20.0, 20.0), (5.0, 20.0)]),
+        tags={"building:part": "yes", "height": "12", "min_height": "4"},
+        osm_id="way/elevated-part",
+    )
+
+    high = build_building_meshes(
+        [part],
+        scaler,
+        terrain,
+        ModelParams(south=0.0, west=0.0, north=0.01, east=0.01, model_detail_mode="high"),
+    )
+
+    assert math.isclose(float(high.vertices[:, 2].min()), 7.0, abs_tol=1e-6)
+    assert math.isclose(float(high.vertices[:, 2].max()), 15.0, abs_tol=1e-6)
+
+
+def test_high_detail_monument_uses_stepped_landmark_shape():
+    scaler = ModelScaler(scale_mm_per_m=1.0, width_mm=50.0, height_mm=50.0)
+    terrain = TerrainGrid(
+        x_mm=np.asarray([[0.0, 50.0], [0.0, 50.0]]),
+        y_mm=np.asarray([[0.0, 0.0], [50.0, 50.0]]),
+        z_mm=np.full((2, 2), 3.0),
+    )
+    monument = OSMFeature(
+        layer="building",
+        geometry_m=Polygon([(0.0, 0.0), (30.0, 0.0), (30.0, 30.0), (0.0, 30.0)]),
+        tags={"building": "yes", "historic": "monument", "memorial": "stele", "height": "20"},
+        osm_id="relation/monument",
+    )
+
+    high = build_building_meshes(
+        [monument],
+        scaler,
+        terrain,
+        ModelParams(south=0.0, west=0.0, north=0.01, east=0.01, model_detail_mode="high"),
+    )
+    top_z = float(high.vertices[:, 2].max())
+    top_xy = high.vertices[np.isclose(high.vertices[:, 2], top_z), :2]
+    z_levels = np.unique(np.round(high.vertices[:, 2], 6))
+
+    assert not high.is_empty()
+    assert float(np.ptp(top_xy[:, 0])) < 12.0
+    assert float(np.ptp(top_xy[:, 1])) < 12.0
+    assert len(z_levels) >= 5
+
+
+def test_high_detail_uses_osm_gabled_roof_shape():
+    scaler = ModelScaler(scale_mm_per_m=1.0, width_mm=40.0, height_mm=40.0)
+    terrain = TerrainGrid(
+        x_mm=np.asarray([[0.0, 40.0], [0.0, 40.0]]),
+        y_mm=np.asarray([[0.0, 0.0], [40.0, 40.0]]),
+        z_mm=np.full((2, 2), 3.0),
+    )
+    feature = OSMFeature(
+        layer="building",
+        geometry_m=Polygon([(5.0, 8.0), (35.0, 8.0), (35.0, 24.0), (5.0, 24.0)]),
+        tags={"building": "yes", "height": "12", "roof:shape": "gabled", "roof:height": "4"},
+        osm_id="way/gabled",
+    )
+
+    normal = build_building_meshes(
+        [feature],
+        scaler,
+        terrain,
+        ModelParams(south=0.0, west=0.0, north=0.01, east=0.01, model_detail_mode="normal"),
+    )
+    high = build_building_meshes(
+        [feature],
+        scaler,
+        terrain,
+        ModelParams(south=0.0, west=0.0, north=0.01, east=0.01, model_detail_mode="high"),
+    )
+    normal_top_z = float(normal.vertices[:, 2].max())
+    high_top_z = float(high.vertices[:, 2].max())
+    high_upper_vertices = high.vertices[high.vertices[:, 2] > high_top_z - 4.2]
+
+    assert math.isclose(normal_top_z, 15.0, abs_tol=1e-6)
+    assert math.isclose(high_top_z, 15.0, abs_tol=1e-6)
+    assert len(np.unique(np.round(high_upper_vertices[:, 2], 6))) >= 2
+    assert len(np.unique(np.round(normal.vertices[:, 2], 6))) == 2
+    diagnostics = mesh_diagnostics(high)
+    assert diagnostics["watertight"] is True
+    assert diagnostics["non_manifold_edges"] == 0
+
+
+def test_osm_roof_meshes_use_only_exterior_sides():
+    poly = Polygon([(0.0, 0.0), (30.0, 0.0), (30.0, 16.0), (0.0, 16.0)])
+
+    for shape in ("gabled", "hipped", "pyramidal", "skillion", "dome"):
+        roof = build_osm_roof_mesh(poly, 8.0, 12.0, shape, "building", COLORS["buildings"])
+        diagnostics = mesh_diagnostics(roof)
+
+        assert not roof.is_empty()
+        assert diagnostics["watertight"] is True
+        assert diagnostics["non_manifold_edges"] == 0
+
+
+def test_high_detail_skillion_roof_uses_osm_direction_on_quad_parts():
+    poly = Polygon([(0.0, 0.0), (22.0, 0.0), (18.0, 3.0), (2.0, 5.0)])
+
+    roof = build_osm_roof_mesh(
+        poly,
+        8.0,
+        12.0,
+        "skillion",
+        "building",
+        COLORS["buildings"],
+        tags={"roof:direction": "0"},
+    )
+    diagnostics = mesh_diagnostics(roof)
+    north_vertices = roof.vertices[roof.vertices[:, 1] > 4.9]
+    south_vertices = roof.vertices[roof.vertices[:, 1] < 0.1]
+
+    assert not roof.is_empty()
+    assert diagnostics["watertight"] is True
+    assert diagnostics["non_manifold_edges"] == 0
+    assert math.isclose(float(north_vertices[:, 2].max()), 12.0, abs_tol=1e-6)
+    assert float(south_vertices[:, 2].max()) < 12.0
+
+
+def test_high_detail_flattens_skillion_building_parts_for_printable_cuboids():
+    scaler = ModelScaler(scale_mm_per_m=1.0, width_mm=30.0, height_mm=30.0)
+    terrain = TerrainGrid(
+        x_mm=np.asarray([[0.0, 30.0], [0.0, 30.0]]),
+        y_mm=np.asarray([[0.0, 0.0], [30.0, 30.0]]),
+        z_mm=np.full((2, 2), 3.0),
+    )
+    feature = OSMFeature(
+        layer="building",
+        geometry_m=Polygon([(0.0, 0.0), (22.0, 0.0), (18.0, 3.0), (2.0, 5.0)]),
+        tags={"building:part": "yes", "height": "12", "roof:shape": "skillion", "roof:height": "4", "roof:direction": "0"},
+        osm_id="way/skillion-direction",
+    )
+
+    high = build_building_meshes(
+        [feature],
+        scaler,
+        terrain,
+        ModelParams(south=0.0, west=0.0, north=0.01, east=0.01, model_detail_mode="high"),
+    )
+    z_levels = np.unique(np.round(high.vertices[:, 2], 6))
+
+    assert math.isclose(float(high.vertices[:, 2].max()), 15.0, abs_tol=1e-6)
+    assert set(np.round(z_levels, 6)) == {3.0, 15.0}
+    diagnostics = mesh_diagnostics(high)
+    assert diagnostics["watertight"] is True
+    assert diagnostics["non_manifold_edges"] == 0
+
+
+def test_high_detail_roof_only_building_part_is_closed():
+    scaler = ModelScaler(scale_mm_per_m=1.0, width_mm=40.0, height_mm=40.0)
+    terrain = TerrainGrid(
+        x_mm=np.asarray([[0.0, 40.0], [0.0, 40.0]]),
+        y_mm=np.asarray([[0.0, 0.0], [40.0, 40.0]]),
+        z_mm=np.full((2, 2), 3.0),
+    )
+    roof_part = OSMFeature(
+        layer="building",
+        geometry_m=Polygon([(5.0, 8.0), (35.0, 8.0), (35.0, 24.0), (5.0, 24.0)]),
+        tags={
+            "building:part": "yes",
+            "height": "35",
+            "min_height": "29",
+            "roof:shape": "gabled",
+            "roof:height": "6",
+        },
+        osm_id="way/roof-only-part",
+    )
+
+    high = build_building_meshes(
+        [roof_part],
+        scaler,
+        terrain,
+        ModelParams(
+            south=0.0,
+            west=0.0,
+            north=0.01,
+            east=0.01,
+            model_detail_mode="high",
+            max_building_height_mm=100.0,
+        ),
+    )
+    diagnostics = mesh_diagnostics(high)
+
+    assert not high.is_empty()
+    assert diagnostics["watertight"] is True
+    assert diagnostics["non_manifold_edges"] == 0
+
+
+def test_high_detail_uses_osm_dome_roof_shape():
+    scaler = ModelScaler(scale_mm_per_m=1.0, width_mm=50.0, height_mm=50.0)
+    terrain = TerrainGrid(
+        x_mm=np.asarray([[0.0, 50.0], [0.0, 50.0]]),
+        y_mm=np.asarray([[0.0, 0.0], [50.0, 50.0]]),
+        z_mm=np.full((2, 2), 3.0),
+    )
+    feature = OSMFeature(
+        layer="building",
+        geometry_m=Point(25.0, 25.0).buffer(15.0, quad_segs=16),
+        tags={"building": "yes", "height": "14", "roof:shape": "dome", "roof:height": "6"},
+        osm_id="way/dome",
+    )
+
+    high = build_building_meshes(
+        [feature],
+        scaler,
+        terrain,
+        ModelParams(south=0.0, west=0.0, north=0.01, east=0.01, model_detail_mode="high"),
+    )
+    z_levels = np.unique(np.round(high.vertices[:, 2], 3))
+
+    assert not high.is_empty()
+    assert math.isclose(float(high.vertices[:, 2].max()), 17.0, abs_tol=1e-6)
+    assert len(z_levels) >= 30
+    diagnostics = mesh_diagnostics(high)
+    assert diagnostics["watertight"] is True
+    assert diagnostics["non_manifold_edges"] == 0
+    assert diagnostics["triangles"] > 6000
 
 
 def _top_surface(part):

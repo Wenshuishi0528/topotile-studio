@@ -35,12 +35,44 @@ def test_model_params_airport_layer_defaults_on():
     assert params.include_airport is True
 
 
+def test_model_params_rail_and_subway_layers_default_off_and_can_enable():
+    params = ModelParams.from_dict({"bbox": [47.62, -122.355, 47.626, -122.3455]})
+
+    assert params.include_rail_lines is False
+    assert params.include_rail_stations is False
+    assert params.include_subway_lines is False
+    assert params.include_subway_stations is False
+
+    enabled = ModelParams.from_dict({
+        "bbox": [47.62, -122.355, 47.626, -122.3455],
+        "include_rail_lines": "true",
+        "include_rail_stations": "true",
+        "include_subway_lines": "true",
+        "include_subway_stations": "true",
+    })
+
+    assert enabled.include_rail_lines is True
+    assert enabled.include_rail_stations is True
+    assert enabled.include_subway_lines is True
+    assert enabled.include_subway_stations is True
+
+
 def test_model_params_area_infill_defaults_on_with_06mm_height():
     params = ModelParams.from_dict({"bbox": [47.62, -122.355, 47.626, -122.3455]})
 
     assert params.include_area_infill is True
     assert params.area_infill_height_mm == 0.60
     assert params.area_infill_mode == "empty_areas"
+    assert params.model_detail_mode == "normal"
+
+
+def test_model_params_accepts_high_detail_mode():
+    params = ModelParams.from_dict({
+        "bbox": [47.62, -122.355, 47.626, -122.3455],
+        "model_detail_mode": "high",
+    })
+
+    assert params.model_detail_mode == "high"
 
 
 def test_model_params_accepts_area_infill_height_and_toggle():
@@ -60,13 +92,25 @@ def test_model_params_auto_repair_mesh_defaults_on_and_can_disable():
     params = ModelParams.from_dict({"bbox": [47.62, -122.355, 47.626, -122.3455]})
 
     assert params.auto_repair_mesh is True
+    assert params.export_print_color_groups is True
 
     disabled = ModelParams.from_dict({
         "bbox": [47.62, -122.355, 47.626, -122.3455],
         "auto_repair_mesh": "false",
+        "export_print_color_groups": "false",
     })
 
     assert disabled.auto_repair_mesh is False
+    assert disabled.export_print_color_groups is False
+
+
+def test_model_params_accepts_old_random_export_colors_alias():
+    params = ModelParams.from_dict({
+        "bbox": [47.62, -122.355, 47.626, -122.3455],
+        "random_export_colors": "false",
+    })
+
+    assert params.export_print_color_groups is False
 
 
 def test_model_params_accepts_saved_route_segments():
@@ -505,3 +549,43 @@ def test_parse_coastline_creates_water_side_polygon():
     assert len(water) == 1
     assert water[0].tags["water"] == "sea"
     assert water[0].geometry_m.area > 0
+
+
+def test_parse_rail_and_subway_lines_and_stations():
+    projection = make_local_projection(47.0, -122.0, 47.01, -121.99)
+    osm_json = {
+        "elements": [
+            {
+                "type": "way",
+                "id": 10,
+                "tags": {"railway": "rail"},
+                "geometry": [{"lon": -121.999, "lat": 47.001}, {"lon": -121.991, "lat": 47.001}],
+            },
+            {
+                "type": "way",
+                "id": 11,
+                "tags": {"railway": "subway", "tunnel": "yes"},
+                "geometry": [{"lon": -121.999, "lat": 47.002}, {"lon": -121.991, "lat": 47.002}],
+            },
+            {
+                "type": "node",
+                "id": 12,
+                "tags": {"railway": "station"},
+                "lon": -121.995,
+                "lat": 47.003,
+            },
+            {
+                "type": "node",
+                "id": 13,
+                "tags": {"railway": "station", "station": "subway"},
+                "lon": -121.994,
+                "lat": 47.004,
+            },
+        ]
+    }
+
+    features = parse_osm_features(osm_json, projection)
+
+    assert {feature.layer for feature in features} == {"rail_line", "subway_line", "rail_station", "subway_station"}
+    assert {feature.osm_id for feature in features if feature.layer == "rail_station"} == {"node/12"}
+    assert {feature.osm_id for feature in features if feature.layer == "subway_station"} == {"node/13"}

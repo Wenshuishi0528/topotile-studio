@@ -53,6 +53,7 @@ def test_generate_cut_out_water_removes_water_mesh(tmp_path: Path):
 
     assert summary["water_cutout"]["enabled"] is True
     assert summary["water_cutout"]["polygons"] > 0
+    assert summary["overture_buildings"]["status"] == "skipped_override"
     assert "water" not in {part["name"] for part in summary["mesh_parts"]}
     assert (tmp_path / "city_model.3mf").exists()
 

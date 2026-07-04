@@ -63,6 +63,7 @@
     .button-row .secondary { margin-top: 0; }
     .button-row.three { grid-template-columns: 1fr 1fr 1fr; }
     .segmented { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px; margin-top: 8px; }
+    .segmented.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .segmented label { margin: 0; }
     .segmented input { position: absolute; opacity: 0; pointer-events: none; }
     .segmented span { display: block; text-align: center; border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 6px; font-size: 12px; font-weight: 800; color: #334155; background: #f8fafc; cursor: pointer; }
@@ -157,7 +158,7 @@
 </head>
 <body>
 <header>
-  <h1>TopoTile Studio / 3D地图工坊 <span class="app-version" id="appVersionLabel">v0.36.8</span></h1>
+  <h1>TopoTile Studio / 3D地图工坊 <span class="app-version" id="appVersionLabel">v0.57</span></h1>
   <div class="header-actions">
     <div class="author-name">Made by Wenshuishi</div>
     <div class="language-switch" aria-label="Language">
@@ -190,6 +191,12 @@
       <button class="secondary" id="useView">Use map view</button>
       <button class="secondary" id="fitSelection">Fit selection</button>
     </div>
+    <label>Model detail</label>
+    <div class="segmented two" id="modelDetailMode">
+      <label><input type="radio" name="model_detail_mode" value="normal" checked><span>Normal</span></label>
+      <label><input type="radio" name="model_detail_mode" value="high"><span>High detail</span></label>
+    </div>
+    <div class="small" id="modelDetailHelp">Normal keeps the current simplified printable buildings. High detail uses OSM building parts, min-height, and OSM roof shapes when available.</div>
     <label>Selection</label>
     <div class="segmented" id="selectionMode">
       <label><input type="radio" name="selection_mode" value="free" checked><span>Free</span></label>
@@ -249,6 +256,8 @@
       <label class="check"><input id="include_parking" type="checkbox" checked> Parking</label>
       <label class="check"><input id="include_airport" type="checkbox" checked> Airport</label>
       <label class="check"><input id="include_area_infill" type="checkbox" checked> Area infill</label>
+      <label class="check"><input id="include_rail_stations" type="checkbox"> Rail stations</label>
+      <label class="check"><input id="include_subway_stations" type="checkbox"> Subway stations</label>
     </div>
     <div class="row">
       <div><label>Area infill height, mm</label><input id="area_infill_height_mm" type="number" value="0.60" min="0.05" max="10" step="0.05"></div>
@@ -261,6 +270,7 @@
       </div>
     </div>
     <div class="small">Airport includes runways, taxiways, and aprons as a low layer with parking-lot thickness.</div>
+    <div class="small">Rail and subway station layers are off by default. Rail and subway line switches are under Road Levels.</div>
     <div class="small">Cut out water removes lakes and ocean from the base so you can place colored material underneath.</div>
 
     <label>Road cleanup strength</label>
@@ -284,8 +294,10 @@
       <label class="check"><input type="checkbox" value="path"> Path</label>
       <label class="check"><input type="checkbox" value="track"> Track</label>
       <label class="check"><input type="checkbox" value="steps"> Steps</label>
+      <label class="check"><input id="include_rail_lines" type="checkbox"> Rail lines</label>
+      <label class="check"><input id="include_subway_lines" type="checkbox"> Subway lines</label>
     </div>
-    <div class="small">Leave small footpaths/service roads off for a cleaner printable street grid.</div>
+    <div class="small">Leave small footpaths/service roads off for a cleaner printable street grid. Rail and subway lines are optional and off by default.</div>
 
     <label>Route / Track</label>
     <div class="checks">
@@ -319,6 +331,12 @@
       <div><label>Chunk columns</label><input id="chunk_cols" type="number" value="2" min="1" max="6"></div>
     </div>
     <div class="small">Numbering starts at the southwest corner: r01_c01, then east by column and north by row.</div>
+
+    <label>Export options</label>
+    <div class="checks">
+      <label class="check"><input id="export_print_color_groups" type="checkbox" checked> 3MF print color groups</label>
+    </div>
+    <div class="small">Keeps the web preview colors unchanged, but writes stable print colors into the 3MF: green land, blue water, gray roads, and white buildings/parking/area infill.</div>
 
     <button class="secondary" id="sample" type="button">Offline Test Model</button>
     <div class="small">Built-in sample: generates a test model without internet.</div>
@@ -362,7 +380,7 @@
   </section>
 </main>
 <script>
-  const APP_VERSION = '0.36.8';
+  const APP_VERSION = '0.57';
   document.getElementById('appVersionLabel').textContent = `v${APP_VERSION}`;
 
   const LANGUAGE_STORAGE_KEY = 'topotile.language';
@@ -380,6 +398,10 @@
     'Built-in sample: generates a test model without internet.': '内置样例：无需联网即可生成测试模型。',
     'Use map view': '使用当前地图视图',
     'Fit selection': '适配选择框',
+    'Model detail': '模型细节',
+    'Normal': '普通模式',
+    'High detail': '高细节模式',
+    'Normal keeps the current simplified printable buildings. High detail uses OSM building parts, min-height, and OSM roof shapes when available.': '普通模式保持当前简化、稳定、适合打印的建筑。高细节模式会在有数据时使用 OSM 建筑部件、离地高度和 OSM 屋顶形状。',
     'Selection': '选择框',
     'Free': '自由',
     'Circle': '圆形',
@@ -423,11 +445,16 @@
     'Parking': '停车场',
     'Airport': '机场',
     'Area infill': '区域补面',
+    'Rail lines': '铁路线',
+    'Rail stations': '铁路站',
+    'Subway lines': '地铁线',
+    'Subway stations': '地铁站',
     'Area infill height, mm': '区域补面高度，mm',
     'Area infill mode': '区域补面模式',
     'No-building areas': '无建筑区域',
     'All area polygons': '全部区域面',
     'Airport includes runways, taxiways, and aprons as a low layer with parking-lot thickness.': '机场包含跑道、滑行道和停机坪，会按停车场类似的低矮图层生成。',
+    'Rail and subway station layers are off by default. Rail and subway line switches are under Road Levels.': '铁路站和地铁站图层默认关闭。铁路线和地铁线开关在道路级别里。',
     'Cut out water removes lakes and ocean from the base so you can place colored material underneath.': '水体镂空会从底板中移除湖泊和海洋，便于在下方放置彩色材料。',
     'Road cleanup strength': '道路清理强度',
     'Balanced: keeps normal streets plus pedestrian/footway.': '平衡：保留普通街道以及 pedestrian/footway。',
@@ -447,7 +474,7 @@
     'Path': '小径',
     'Track': '土路/轨迹路',
     'Steps': '台阶',
-    'Leave small footpaths/service roads off for a cleaner printable street grid.': '关闭较小的步道/服务道路，可以得到更干净、更适合打印的街道网格。',
+    'Leave small footpaths/service roads off for a cleaner printable street grid. Rail and subway lines are optional and off by default.': '关闭较小的步道/服务道路，可以得到更干净、更适合打印的街道网格。铁路线和地铁线是可选项，默认关闭。',
     'Route / Track': '路线 / 轨迹',
     'Raised route line': '凸起路线',
     'Route width, mm': '路线宽度，mm',
@@ -464,6 +491,9 @@
     'Chunk rows': '分块行数',
     'Chunk columns': '分块列数',
     'Numbering starts at the southwest corner: r01_c01, then east by column and north by row.': '编号从西南角开始：r01_c01，然后按列向东、按行向北。',
+    'Export options': '导出选项',
+    '3MF print color groups': '3MF 打印图层分色',
+    'Keeps the web preview colors unchanged, but writes stable print colors into the 3MF: green land, blue water, gray roads, and white buildings/parking/area infill.': '网页预览颜色保持不变，只在 3MF 中写入稳定打印颜色：绿地为绿色，水系为蓝色，道路为灰色，建筑/停车场/补区为白色。',
     'Mesh repair': '网格修复',
     'Auto repair non-manifold edges': '自动修复非流形边',
     'Runs before 3MF/GLB/STL export. It removes common degenerate/duplicate geometry and reports any remaining mesh issues.': '在导出 3MF/GLB/STL 前运行。会移除常见退化/重复几何，并报告剩余网格问题。',
@@ -523,10 +553,12 @@
     'Area infill mode: {mode}': '区域补面模式：{mode}',
     'Route: {points} points, {segments} clipped segment(s), {width} mm × {height} mm': '路线：{points} 个点，{segments} 段裁剪线，{width} mm × {height} mm',
     'OSM tiles: {count}': 'OSM 分块：{count}',
+    'Overture buildings: {status}, added {added}, skipped overlaps {skipped}': 'Overture 补充建筑：{status}，新增 {added}，跳过重叠 {skipped}',
     'Features: {features}': '要素：{features}',
     'Road levels: {levels}': '道路级别：{levels}',
     'none': '无',
     'Chunks: {rows} × {cols} ({pieces} files)': '分块：{rows} × {cols}（{pieces} 个文件）',
+    '3MF print color groups: on': '3MF 打印图层分色：已开启',
     'Printability: {score}/100 {grade}': '可打印性：{score}/100 {grade}',
     'Mesh repair: {status}, non-manifold edges {before} → {after}': '网格修复：{status}，非流形边 {before} → {after}',
     'Mesh repair: disabled': '网格修复：已关闭',
@@ -637,6 +669,11 @@
     cancelled: '已取消',
     complete: '完成',
     failed: '失败',
+    empty: '无数据',
+    truncated: '已截断',
+    skipped_override: '测试数据跳过',
+    disabled: '已关闭',
+    unknown: '未知',
   };
 
   function preferredLanguage() {
@@ -789,6 +826,11 @@
   function selectionMode() {
     const selected = document.querySelector('input[name="selection_mode"]:checked');
     return selected ? selected.value : 'free';
+  }
+
+  function modelDetailMode() {
+    const selected = document.querySelector('input[name="model_detail_mode"]:checked');
+    return selected ? selected.value : 'normal';
   }
 
   function selectionShape() {
@@ -1727,18 +1769,25 @@
     numericIds.forEach(id => {
       if (p[id] !== undefined && document.getElementById(id)) document.getElementById(id).value = p[id];
     });
-    const boolIds = ['large_map_mode','auto_terrain','include_buildings','include_roads','include_water','cut_out_water','include_green','include_parking','include_airport','include_area_infill','include_route','chunk_export','auto_repair_mesh'];
+    if (p.export_print_color_groups === undefined && p.random_export_colors !== undefined) {
+      p.export_print_color_groups = p.random_export_colors;
+    }
+    const boolIds = ['large_map_mode','auto_terrain','include_buildings','include_roads','include_water','cut_out_water','include_green','include_parking','include_airport','include_area_infill','include_rail_lines','include_rail_stations','include_subway_lines','include_subway_stations','include_route','chunk_export','auto_repair_mesh','export_print_color_groups'];
     boolIds.forEach(id => {
       if (p[id] !== undefined && document.getElementById(id)) document.getElementById(id).checked = Boolean(p[id]);
     });
     if (p.include_airport === undefined) document.getElementById('include_airport').checked = true;
     if (p.include_area_infill === undefined) document.getElementById('include_area_infill').checked = true;
     if (p.auto_repair_mesh === undefined) document.getElementById('auto_repair_mesh').checked = true;
+    if (p.export_print_color_groups === undefined) document.getElementById('export_print_color_groups').checked = true;
     const areaInfillMode = document.getElementById('area_infill_mode');
     if (areaInfillMode) {
       areaInfillMode.value = p.area_infill_mode || 'empty_areas';
       if (!areaInfillMode.value) areaInfillMode.value = 'empty_areas';
     }
+    const detailMode = p.model_detail_mode || 'normal';
+    const detailSelected = document.querySelector(`input[name="model_detail_mode"][value="${detailMode}"]`);
+    if (detailSelected) detailSelected.checked = true;
     if (p.output_name !== undefined) document.getElementById('output_name').value = p.output_name;
     if (p.dem_attribution !== undefined) document.getElementById('dem_attribution').value = p.dem_attribution;
     routeSegments = normalizeRouteSegments(p.route_segments || []);
@@ -1824,13 +1873,19 @@
     p.cut_out_water = document.getElementById('cut_out_water').checked;
     p.chunk_export = document.getElementById('chunk_export').checked;
     p.auto_repair_mesh = document.getElementById('auto_repair_mesh').checked;
+    p.export_print_color_groups = document.getElementById('export_print_color_groups').checked;
     p.selection_shape = selectionShape();
     p.include_green = document.getElementById('include_green').checked;
     p.include_parking = document.getElementById('include_parking').checked;
     p.include_airport = document.getElementById('include_airport').checked;
     p.include_area_infill = document.getElementById('include_area_infill').checked;
+    p.include_rail_lines = document.getElementById('include_rail_lines').checked;
+    p.include_rail_stations = document.getElementById('include_rail_stations').checked;
+    p.include_subway_lines = document.getElementById('include_subway_lines').checked;
+    p.include_subway_stations = document.getElementById('include_subway_stations').checked;
     p.include_route = document.getElementById('include_route').checked;
     p.area_infill_mode = document.getElementById('area_infill_mode').value;
+    p.model_detail_mode = modelDetailMode();
     p.dem_attribution = document.getElementById('dem_attribution').value;
     p.output_name = document.getElementById('output_name').value.trim() || 'city_model';
     p.project_name = p.output_name;
@@ -1921,9 +1976,17 @@
         if (s.area_infill_mode) statusEl.textContent += `\n${tr('Area infill mode: {mode}', {mode: tr(s.area_infill_mode)})}`;
         if (s.route && s.route.enabled) statusEl.textContent += `\n${tr('Route: {points} points, {segments} clipped segment(s), {width} mm × {height} mm', {points: s.route.points, segments: s.route.clipped_segments, width: s.route.width_mm, height: s.route.height_mm})}`;
         if (s.osm_tile_count) statusEl.textContent += `\n${tr('OSM tiles: {count}', {count: s.osm_tile_count})}`;
+        if (s.overture_buildings && s.overture_buildings.enabled) {
+          statusEl.textContent += `\n${tr('Overture buildings: {status}, added {added}, skipped overlaps {skipped}', {
+            status: tr(s.overture_buildings.status || 'unknown'),
+            added: s.overture_buildings.added || 0,
+            skipped: s.overture_buildings.skipped_overlap || 0,
+          })}`;
+        }
         statusEl.textContent += `\n${tr('Features: {features}', {features: JSON.stringify(s.features)})}`;
         if (s.selected_road_levels) statusEl.textContent += `\n${tr('Road levels: {levels}', {levels: s.selected_road_levels.join(', ') || tr('none')})}`;
         if (s.chunk_export && s.chunk_export.enabled) statusEl.textContent += `\n${tr('Chunks: {rows} × {cols} ({pieces} files)', {rows: s.chunk_export.rows, cols: s.chunk_export.cols, pieces: s.chunk_export.pieces})}`;
+        if (s.export_print_color_groups && s.export_print_color_groups.enabled) statusEl.textContent += `\n${tr('3MF print color groups: on')}`;
         if (s.printability) {
           statusEl.textContent += `\n${tr('Printability: {score}/100 {grade}', {score: s.printability.score, grade: s.printability.grade})}`;
           const issues = (s.printability.issues || []).slice(0, 4);

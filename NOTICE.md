@@ -36,6 +36,24 @@ https://www.openstreetmap.org/copyright
 
 使用 OSM 数据生成的模型、截图或发布内容，应保留上述署名。
 
+## Overture Maps Building Supplement / Overture Maps 建筑补充
+
+When the building layer is enabled, TopoTile Studio may supplement missing
+building footprints with Overture Maps Foundation building data. OSM buildings
+remain primary, and overlapping Overture footprints are skipped.
+
+开启建筑图层时，TopoTile Studio 可能会使用 Overture Maps Foundation 的建筑数据补充
+OSM 中缺失的建筑轮廓。OSM 建筑优先，和已有 OSM 建筑重叠的 Overture 轮廓会被跳过。
+
+Required attribution when Overture building data is used:
+
+```text
+Supplemental building footprints: © Overture Maps Foundation, available under the Open Database License.
+https://overturemaps.org
+```
+
+Reference: https://docs.overturemaps.org/attribution/
+
 ## Public API Usage / 公共服务使用
 
 TopoTile Studio may use public OpenStreetMap ecosystem services such as

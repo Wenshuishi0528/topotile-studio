@@ -4,6 +4,111 @@ All notable changes to TopoTile Studio / 3D地图工坊 are recorded here.
 
 Time zone: local macOS time. Some early entries are reconstructed from request order, screenshots, backup names, and file modification times.
 
+## 2026-07-04
+
+### 11:58 - Printable Flat Skillion Building Parts and Version 0.57
+
+- Fixed high-detail palace/eave blocks whose side edges were repaired but whose tops still appeared sunken or sloped.
+- Changed `building:part=yes` features tagged with `roof:shape=skillion` to print as flat cuboid-like blocks instead of sloped roof wedges.
+- Kept explicit `gabled`, `hipped`, `pyramidal`, and `dome` roof handling in High detail mode.
+- Verified the Tiananmen high-detail cached job: all 232 raw `skillion` building parts are now treated as flat printable parts, and the full building mesh remains watertight with zero non-manifold edges.
+- Added a regression test for printable flat `skillion` building parts and updated the app version to `v0.57`.
+
+### 11:23 - Direction-Aware High Detail Roof Parts and Version 0.56
+
+- Fixed the remaining palace-style high-detail roof/eave parts that still appeared as triangular or missing-corner cuboids after the closed-mesh fix.
+- Passed `roof:direction` and `roof:orientation` tags into the actual high-detail building export path.
+- Generated `skillion` roof parts from their real four-point footprints first, then used OSM compass direction values such as `88.5`, `178.5`, `268.5`, and `358.5` to place the high and low sides correctly.
+- Allowed only direction-tagged `skillion` roof parts to use a narrow near-rectangle fallback, so long eave pieces are stabilized without forcing normal complex buildings into rectangles.
+- Added regression tests for direction-aware high-detail roofs and updated the app version to `v0.56`.
+
+### 10:57 - Closed High Detail Roof Meshes and Version 0.55
+
+- Replaced the previous roof-bottom removal approach with closed high-detail roof solids so exported roof/body geometry no longer leaves open contour edges.
+- Added analytic closed meshes for rectangular `gabled`, `skillion`, `hipped`, and `pyramidal` OSM roofs, which fixes narrow palace-style roof and eave parts that previously appeared as broken triangular edges.
+- Rebuilt `dome` roofs with a higher-resolution radial mesh so landmark domes such as the National Centre for the Performing Arts render smoother and remain watertight.
+- Added a safety fallback that downgrades unsupported irregular roof footprints to flat closed building solids instead of exporting malformed high-detail roof geometry.
+- Updated the app version to `v0.55`.
+
+### 10:02 - Roof Coplanar Face Fix and Version 0.54
+
+- Superseded by the 10:57 closed-roof fix after real Tiananmen high-detail geometry showed that roof-bottom removal still left open contour edges.
+- Removed high-detail generated roof bottom faces from the normal building export path to avoid coplanar flicker/triangular artifacts against building bodies and stacked building parts.
+- Increased dome/round roof sampling resolution for smoother hemispherical and spherical landmark roofs.
+- Updated version numbering to the single-decimal project scheme and display it as `v0.54` in the app while keeping the internal version value as `0.54`.
+
+## 2026-07-03
+
+### 23:58 - High Detail Roof Mesh Closure Fix
+
+- Fixed malformed high-detail roof/body geometry where internal roof triangulation edges could be treated as side walls.
+- Changed OSM roof mesh side generation to use only the building footprint exterior boundary.
+- Added watertight/non-manifold regression coverage for gabled, hipped, pyramidal, skillion, and dome roof meshes.
+- Bumped the web app version to `v0.36.17`.
+
+### 23:41 - Default Overture Building Supplement
+
+- Added default Overture Maps building-footprint supplementation when the Buildings layer is enabled.
+- Kept OSM buildings as the primary source and skipped Overture footprints that overlap existing OSM building geometry.
+- Reused the existing Normal and High detail building generation paths, so supplemental footprints can use Overture height, floor, and roof tags when available.
+- Cached Overture building batches under the OSM cache folder and kept generation soft-fail when the supplemental source is unavailable.
+- Added Overture attribution to generated `ATTRIBUTION.txt`, `README.md`, and `NOTICE.md`.
+- Bumped the web app version to `v0.36.16`.
+
+### 22:56 - OSM Roof Shapes in High Detail Mode
+
+- Added High detail building generation for explicit OSM `roof:shape` tags.
+- Supported printable approximations for gabled, hipped, pyramidal, skillion, and dome/round roofs.
+- Used `roof:height` / `roof:levels` when present while keeping total building height bounded by the OSM building height.
+- Left Normal mode unchanged and skipped unsupported or missing roof-shape tags.
+- Bumped the web app version to `v0.36.15`.
+
+### 19:26 - Move Rail and Subway Line Controls
+
+- Moved `Rail lines` and `Subway lines` from the main `Layers` section into the `Road Levels` checkbox group.
+- Kept `Rail stations` and `Subway stations` in the main `Layers` section because they are station marker layers rather than line levels.
+- Updated the English and Chinese helper text to reflect the new control placement.
+- Bumped the web app version to `v0.36.14`.
+
+### 19:20 - Optional Rail and Subway Layers
+
+- Added four default-off layer switches: `Rail lines`, `Rail stations`, `Subway lines`, and `Subway stations`.
+- Added OSM fetching and parsing for railway tracks, subway tracks, railway stations, subway stations, and subway entrances.
+- Generated rail/subway lines as low terrain-following strips and station nodes as small printable station markers.
+- Added rail/subway feature counts to generation summaries and print-color grouping support for 3MF export.
+- Bumped the web app version to `v0.36.13`.
+
+### 17:17 - 3MF Print Color Groups
+
+- Replaced the previous random export coloring behavior with stable 3MF-only print color groups.
+- Kept web preview and GLB colors unchanged while writing grouped 3MF print colors: green for green space, blue for water, gray for roads, and white for buildings, parking, airport, and area infill.
+- Renamed the setting to `3MF print color groups` / `3MF 打印图层分色` and saved it as `export_print_color_groups`.
+- Kept compatibility with older project files that still contain `random_export_colors`.
+- Bumped the web app version to `v0.36.12`.
+
+### 17:04 - Random Color Defaults and Monument Shape
+
+- Changed `Random colors on export` to be enabled by default for new and older loaded project configurations.
+- Refined high-detail monument generation into a lower stepped base plus a slimmer rectangular stele/obelisk body.
+- Tightened monument geometry tests so landmark tops must be visibly narrower than their bases.
+- Bumped the web app version to `v0.36.11`.
+
+### 14:30 - Random Export Colors
+
+- Added a `Random colors on export` option in the export settings.
+- When enabled, 3MF and GLB exports get randomized non-terrain layer colors while STL geometry remains unchanged.
+- Added random color metadata to `summary.json` for generated jobs.
+- Saved and loaded `random_export_colors` in project JSON files.
+- Bumped the web app version to `v0.36.10`.
+
+### 14:15 - Model Detail Mode
+
+- Added a `Model detail` control above the map selection section with `Normal` and `High detail` modes.
+- Kept `Normal` mode as the existing simplified, print-friendly building workflow.
+- Added first-pass `High detail` building logic that prefers OSM `building:part` geometry over parent building blocks, respects `min_height`/`min_level`, and gives monument-style landmarks a stepped low-poly shape when OSM tags identify them.
+- Saved and loaded `model_detail_mode` in project JSON files.
+- Bumped the web app version to `v0.36.9`.
+
 ## 2026-07-01
 
 ### 18:33 - Public Release v0.36.8

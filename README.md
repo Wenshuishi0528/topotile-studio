@@ -32,6 +32,7 @@ Key features / 主要功能：
 
 - Interactive map selection with free, fixed-ratio, circle, and hexagon modes / 支持自由比例、固定比例、圆形和正六边形选区
 - OSM buildings, roads, water, green areas, outdoor surface parking, and airport pavement / 支持 OSM 建筑、道路、水体、绿地、室外露天停车场和机场跑道/滑行道硬化面
+- Default Overture Maps building supplement for areas where OSM footprints are missing / 默认使用 Overture Maps 补充 OSM 缺失建筑轮廓
 - Automatic terrain relief, DEM upload, and large-map terrain tile mode / 支持自动地形、DEM 上传和大型地图地形瓦片模式
 - Water cutout mode for hollow water areas / 支持水体镂空模式，便于下方放置蓝色纸片或材料
 - Road-level selection, road cleanup presets, and separate footway/pedestrian widths / 支持道路级别选择、道路清理强度和步行道路独立宽度
@@ -59,6 +60,7 @@ Key features / 主要功能：
 - Can export raised GPX/KML route tracks over terrain
 - Automatically applies common mesh repair before export
 - Downloads OSM features through Overpass API
+- Adds Overture Maps building footprints by default when the selected area has gaps in OSM building data; OSM buildings remain primary and overlapping Overture footprints are skipped
 - Supports closed OSM water ways, water multipolygon relations, supplemental large-area water-boundary fetching, and coastline-derived ocean water when coastline data crosses the selection
 - Supports airport runways, taxiways, and aprons as a low printable pavement layer
 - Accepts an optional DEM GeoTIFF upload for terrain relief; uploaded DEMs override auto terrain
@@ -72,7 +74,8 @@ Key features / 主要功能：
 
 - This is a Beta tool. It is useful, but not guaranteed to handle every map area or slicer edge case.
 - Large map selections can still hit public Overpass API rate limits or timeouts. Use smaller areas, caching, or self-hosted/third-party OSM services for heavy use.
-- OSM data completeness depends on local mapping quality. Missing OSM buildings, roads, water, or green areas cannot always be recovered automatically.
+- OSM data completeness depends on local mapping quality. Missing OSM buildings can often be supplemented from Overture Maps; missing roads, water, or green areas cannot always be recovered automatically.
+- Overture supplemental building data is used as a fallback footprint source, not a guarantee of complete or survey-grade building geometry.
 - Water multipolygon relations and large water bodies are supported better than before, but extremely complex or incomplete OSM relations may still fail.
 - Normal auto terrain relief uses 90 m elevation data, so small curbs, stairs, and building-scale grade changes are not captured. Large Map Mode uses cached terrain GeoTIFF tiles instead.
 - Terrain-following feature layers are simplified for printability.
@@ -186,6 +189,17 @@ Data © OpenStreetMap contributors, available under the Open Database License.
 
 The app uses public Overpass API instances for OpenStreetMap feature downloads. Normal use does not require an API key or registration. Successful OSM responses are cached under `data/cache/osm/`; if a public Overpass server rejects a request, shrink the selection area or retry later.
 
+When buildings are enabled, the app also tries to supplement missing building
+footprints from Overture Maps Foundation's buildings dataset. OSM buildings stay
+primary: Overture footprints that overlap existing OSM buildings are skipped.
+Successful Overture building batches are cached under
+`data/cache/osm/overture_buildings/` and are cleared with the OSM cache.
+
+如果开启建筑图层，程序会默认尝试用 Overture Maps Foundation 的建筑数据补充 OSM
+缺失的建筑轮廓。OSM 建筑优先；与已有 OSM 建筑重叠的 Overture 轮廓会被跳过。
+成功下载的 Overture 建筑批次会缓存到
+`data/cache/osm/overture_buildings/`，清理 OSM 缓存时会一并清理。
+
 Public OpenStreetMap ecosystem services are not unlimited commercial backends.
 For heavy use, reduce request frequency, keep cache enabled, use third-party
 providers, or self-host the required services.
@@ -202,6 +216,7 @@ See also:
 - `DISCLAIMER.md` for model accuracy, printability, and data-completeness disclaimers.
 - OpenStreetMap copyright: https://www.openstreetmap.org/copyright
 - OSMF attribution guidelines: https://osmfoundation.org/wiki/Licence/Attribution_Guidelines
+- Overture Maps attribution: https://docs.overturemaps.org/attribution/
 - OSM tile usage policy: https://operations.osmfoundation.org/policies/tiles/
 - Nominatim usage policy: https://operations.osmfoundation.org/policies/nominatim/
 

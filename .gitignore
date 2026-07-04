@@ -8,6 +8,7 @@ data/server.pid
 data/cache/*
 data/jobs/*
 data/outputs/*
+design_exports/
 !data/cache/.gitkeep
 !data/jobs/.gitkeep
 !data/outputs/.gitkeep
