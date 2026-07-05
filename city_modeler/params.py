@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import math
 from typing import Any
 
 ROAD_LEVELS = [
@@ -23,6 +24,8 @@ ROAD_LEVELS = [
 SELECTION_SHAPES = ["rectangle", "circle", "hexagon"]
 AREA_INFILL_MODES = ["empty_areas", "all_areas"]
 MODEL_DETAIL_MODES = ["normal", "high"]
+MODEL_DATA_SOURCES = ["osm", "local_vector"]
+VECTOR_COORDINATE_SYSTEMS = ["wgs84", "gcj02", "bd09"]
 DEFAULT_ROAD_LEVELS = [
     "motorway",
     "trunk",
@@ -155,7 +158,7 @@ def normalize_route_configs(
 
 def safe_output_stem(value: object, default: str = "city_model") -> str:
     stem = str(value or "").strip()
-    for suffix in (".3mf", ".glb", ".stl", ".zip"):
+    for suffix in (".3mf", ".glb", ".dae", ".stl", ".zip"):
         if stem.lower().endswith(suffix):
             stem = stem[: -len(suffix)]
             break
@@ -202,6 +205,15 @@ class ModelParams:
     chunk_cols: int = 1
     auto_repair_mesh: bool = True
     export_print_color_groups: bool = True
+    enable_render_textures: bool = False
+    texture_wall_repeat_mm: float = 12.0
+    texture_roof_repeat_mm: float = 18.0
+    include_landmark_replacement: bool = False
+    landmark_scale: float = 1.0
+    landmark_rotation_deg: float = 0.0
+    landmark_z_offset_mm: float = 0.0
+    landmark_fit_to_footprint: bool = True
+    landmark_replace_original: bool = True
 
     include_buildings: bool = True
     include_roads: bool = True
@@ -221,8 +233,12 @@ class ModelParams:
     dem_attribution: str = ""
     project_name: str = "TopoTile Studio / 3D地图工坊 City Tile"
     output_name: str = "city_model"
+    model_data_source: str = "osm"
+    vector_coordinate_system: str = "wgs84"
+    vector_data_attribution: str = ""
     area_infill_mode: str = "empty_areas"
     model_detail_mode: str = "normal"
+    landmark_osm_id: str = ""
     route_name: str = ""
     route_segments: list[list[list[float]]] = field(default_factory=list)
     routes: list[dict[str, Any]] = field(default_factory=list)
@@ -254,12 +270,14 @@ class ModelParams:
             "min_road_width_mm", "footway_width_mm", "pedestrian_width_mm", "bridge_clearance_mm",
             "area_infill_height_mm", "route_width_mm", "route_height_mm", "route_offset_mm",
             "max_terrain_height_mm", "simplify_tolerance_mm",
-            "osm_tile_size_km",
+            "osm_tile_size_km", "texture_wall_repeat_mm", "texture_roof_repeat_mm",
+            "landmark_scale", "landmark_rotation_deg", "landmark_z_offset_mm",
         }
         int_fields = {"terrain_grid_size", "terrain_tile_zoom", "road_cleaning_level", "chunk_rows", "chunk_cols"}
         bool_fields = {
             "auto_terrain", "large_map_mode", "cut_out_water", "chunk_export", "auto_repair_mesh",
-            "export_print_color_groups",
+            "export_print_color_groups", "enable_render_textures",
+            "include_landmark_replacement", "landmark_fit_to_footprint", "landmark_replace_original",
             "include_buildings", "include_roads", "include_water", "include_green", "include_parking",
             "include_airport", "include_area_infill", "include_route",
             "include_rail_lines", "include_rail_stations", "include_subway_lines", "include_subway_stations"
@@ -281,6 +299,10 @@ class ModelParams:
             filtered["area_infill_mode"] = str(filtered["area_infill_mode"]).strip().lower()
         if "model_detail_mode" in filtered:
             filtered["model_detail_mode"] = str(filtered["model_detail_mode"]).strip().lower()
+        if "model_data_source" in filtered:
+            filtered["model_data_source"] = str(filtered["model_data_source"]).strip().lower()
+        if "vector_coordinate_system" in filtered:
+            filtered["vector_coordinate_system"] = str(filtered["vector_coordinate_system"]).strip().lower()
         if "road_levels" in filtered:
             value = filtered["road_levels"]
             if isinstance(value, str):
@@ -338,6 +360,10 @@ class ModelParams:
             raise ValueError(f"area_infill_mode must be one of: {', '.join(AREA_INFILL_MODES)}")
         if self.model_detail_mode not in MODEL_DETAIL_MODES:
             raise ValueError(f"model_detail_mode must be one of: {', '.join(MODEL_DETAIL_MODES)}")
+        if self.model_data_source not in MODEL_DATA_SOURCES:
+            raise ValueError(f"model_data_source must be one of: {', '.join(MODEL_DATA_SOURCES)}")
+        if self.vector_coordinate_system not in VECTOR_COORDINATE_SYSTEMS:
+            raise ValueError(f"vector_coordinate_system must be one of: {', '.join(VECTOR_COORDINATE_SYSTEMS)}")
         if self.road_cleaning_level < 0 or self.road_cleaning_level > 3:
             raise ValueError("road_cleaning_level must be between 0 and 3.")
         if self.chunk_rows < 1 or self.chunk_rows > 6:
@@ -346,6 +372,15 @@ class ModelParams:
             raise ValueError("chunk_cols must be between 1 and 6.")
         if self.chunk_rows * self.chunk_cols > 24:
             raise ValueError("chunk export supports up to 24 pieces per job.")
+        self.landmark_osm_id = str(self.landmark_osm_id or "").strip()
+        if self.landmark_scale <= 0 or self.landmark_scale > 1000:
+            raise ValueError("landmark_scale must be in the range (0, 1000].")
+        if self.landmark_z_offset_mm < -200 or self.landmark_z_offset_mm > 200:
+            raise ValueError("landmark_z_offset_mm must be between -200 and 200.")
+        if not math.isfinite(self.landmark_rotation_deg):
+            raise ValueError("landmark_rotation_deg must be a finite number.")
+        if self.include_landmark_replacement and not self.landmark_osm_id:
+            raise ValueError("include_landmark_replacement requires a target OSM ID.")
         self.output_name = safe_output_stem(self.output_name)
         unsupported = sorted(set(self.road_levels) - set(ROAD_LEVELS))
         if unsupported:

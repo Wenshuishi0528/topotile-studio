@@ -6,6 +6,58 @@ Time zone: local macOS time. Some early entries are reconstructed from request o
 
 ## 2026-07-04
 
+### 18:49 - China Local Vector Model Data Source
+
+- Added a `China model data source` setting under `China data`, keeping OSM as the default fallback while allowing a user-supplied authorized GeoJSON file to replace OSM model data.
+- Added GeoJSON parsing for buildings, roads, water, green areas, parking, airport pavement, area infill, rail/subway lines, and rail/subway stations, including WGS84, GCJ-02, and BD-09 coordinate handling.
+- Added direct road-polygon rendering for imported GIS datasets where roads are stored as surfaces instead of centerlines.
+- Added API upload validation, local vector attribution output, generation summaries, and regression tests for local vector parsing, upload handling, and end-to-end export.
+- Updated the app version to `v0.65`.
+
+### 18:04 - Landmark Replacement UI Position
+
+- Moved the `Landmark replacement` controls from below `Model detail` to below the `Route / Track` section in the left settings panel.
+- Kept the landmark replacement generation logic unchanged.
+- Updated the app version to `v0.64`.
+
+### 17:45 - Manual Landmark Replacement
+
+- Added a first-stage manual landmark replacement workflow: upload a GLB/GLTF/OBJ/STL/DAE model, enter a target OSM building ID, and manually tune scale, rotation, and Z offset.
+- Added backend placement that fits uploaded models to the target footprint by default, anchors them to terrain, and removes the original OSM building plus overlapping building parts when replacement is enabled.
+- Added a dedicated `landmark` mesh layer and summary reporting for matched OSM ID, removed building count, placement scale, and imported mesh size.
+- Added UI controls, project JSON persistence for replacement settings, API upload handling, and regression tests for parameters, upload validation, and generation output.
+- Updated the app version to `v0.63`.
+
+### 16:50 - SketchUp Collada Export
+
+- Added a SketchUp-friendly `.dae` / Collada export alongside 3MF, GLB, and STL.
+- Wrote DAE files with millimeter units, Z-up orientation, per-layer mesh nodes, and preview-color materials for easier editing in SketchUp.
+- Added a `Download SketchUp (.dae)` link after generation and included DAE in offline test model exports.
+- Added regression tests for DAE XML structure, generated file summaries, and API download links.
+- Updated the app version to `v0.62`.
+
+### 16:14 - China Map and Texture Upload Review
+
+- Rechecked the `Data version` UI: international mode, China map settings, Tianditu no-token fallback, custom XYZ switching, and texture-control show/hide behavior.
+- Tightened render-texture uploads so files must be real PNG/JPG/JPEG/WebP images, not only files with matching extensions.
+- Added a regression test that rejects invalid texture image uploads before a generation job is queued.
+
+### 15:18 - Preview / GLB Render Texture Uploads
+
+- Added a first-stage `Render textures` option for user-uploaded PNG/JPG/WebP textures.
+- Supported separate preview texture uploads for terrain/base top surfaces, building walls, and building roofs.
+- Exported uploaded textures into the GLB preview/download with generated UV coordinates while keeping 3MF print color groups unchanged.
+- Added wall and roof repeat-size controls, backend texture upload validation, and regression tests for GLB texture embedding and API texture uploads.
+- Added Pillow as an explicit dependency for reliable texture image loading and updated the app version to `v0.61`.
+
+### 14:39 - International and China Map Display Versions
+
+- Added a parent `Data version` switch with `International data` as the default, preserving the existing OpenStreetMap map view and generation workflow.
+- Added a `China data` display mode with a simple stable first set of map sources: Tianditu vector, Tianditu imagery, and custom XYZ tiles.
+- Kept domestic map tokens and custom tile URLs in browser local storage only; project JSON records the display edition/source but does not save API keys.
+- Added safe fallbacks so missing Tianditu tokens or invalid custom XYZ URLs keep showing OpenStreetMap instead of leaving the map blank.
+- Updated the app version to `v0.60`.
+
 ### 13:25 - 3MF Assembly Export for Layer Alignment
 
 - Fixed large-map 3MF imports where slicers could treat airport/runway layers as independent models and separate them from the terrain tile.

@@ -4,8 +4,15 @@ import json
 from io import BytesIO
 from fastapi import HTTPException
 from fastapi import UploadFile
+from PIL import Image
 
 from app import main
+
+
+def tiny_png_bytes() -> bytes:
+    stream = BytesIO()
+    Image.new("RGBA", (2, 2), (255, 255, 255, 255)).save(stream, format="PNG")
+    return stream.getvalue()
 
 
 class FakeResponse:
@@ -122,6 +129,7 @@ def test_job_downloads_use_summary_file_names():
         "files": {
             "3mf": "UW_Campus.3mf",
             "glb": "UW_Campus.glb",
+            "dae": "UW_Campus.dae",
             "stl": "UW_Campus.stl",
             "attribution": "ATTRIBUTION.txt",
             "chunks_zip": "UW_Campus_chunks.zip",
@@ -134,6 +142,7 @@ def test_job_downloads_use_summary_file_names():
 
     assert downloads["3mf"].endswith("/UW_Campus.3mf")
     assert downloads["glb"].endswith("/UW_Campus.glb")
+    assert downloads["dae"].endswith("/UW_Campus.dae")
     assert downloads["stl"].endswith("/UW_Campus.stl")
     assert downloads["chunks"].endswith("/UW_Campus_chunks.zip")
     assert downloads["chunks_manifest"].endswith("/UW_Campus_chunks_manifest.json")
@@ -149,10 +158,13 @@ def test_create_job_parses_uploaded_route_file(tmp_path, monkeypatch):
 
     captured = {}
 
-    def fake_submit_job(job_id, fn, params_data, dem_path):
+    def fake_submit_job(job_id, fn, params_data, dem_path, landmark_model_path, texture_paths, vector_data_path=None):
         captured["job_id"] = job_id
         captured["params_data"] = params_data
         captured["dem_path"] = dem_path
+        captured["landmark_model_path"] = landmark_model_path
+        captured["texture_paths"] = texture_paths
+        captured["vector_data_path"] = vector_data_path
 
     monkeypatch.setattr(main, "JOBS_DIR", jobs)
     monkeypatch.setattr(main, "OUTPUTS_DIR", outputs)
@@ -174,6 +186,9 @@ def test_create_job_parses_uploaded_route_file(tmp_path, monkeypatch):
 
     assert result["job_id"] == captured["job_id"]
     assert captured["dem_path"] is None
+    assert captured["landmark_model_path"] is None
+    assert captured["texture_paths"] == {"ground": None, "wall": None, "roof": None}
+    assert captured["vector_data_path"] is None
     assert captured["params_data"]["route_name"] == "walk.gpx"
     assert captured["params_data"]["route_segments"] == [[[47.62, -122.35], [47.621, -122.349]]]
     assert captured["params_data"]["routes"] == [{
@@ -184,6 +199,250 @@ def test_create_job_parses_uploaded_route_file(tmp_path, monkeypatch):
         "offset_mm": 0.15,
     }]
     assert (jobs / captured["job_id"] / "route.gpx").exists()
+
+
+def test_create_job_saves_uploaded_render_textures(tmp_path, monkeypatch):
+    jobs = tmp_path / "jobs"
+    outputs = tmp_path / "outputs"
+    cache = tmp_path / "cache"
+    for path in (jobs, outputs, cache):
+        path.mkdir(parents=True)
+
+    captured = {}
+
+    def fake_submit_job(job_id, fn, params_data, dem_path, landmark_model_path, texture_paths, vector_data_path=None):
+        captured["job_id"] = job_id
+        captured["params_data"] = params_data
+        captured["dem_path"] = dem_path
+        captured["landmark_model_path"] = landmark_model_path
+        captured["texture_paths"] = texture_paths
+        captured["vector_data_path"] = vector_data_path
+
+    monkeypatch.setattr(main, "JOBS_DIR", jobs)
+    monkeypatch.setattr(main, "OUTPUTS_DIR", outputs)
+    monkeypatch.setattr(main, "CACHE_DIR", cache)
+    monkeypatch.setattr(main, "submit_job", fake_submit_job)
+
+    params = {
+        "bbox": [47.62, -122.355, 47.626, -122.3455],
+        "enable_render_textures": True,
+    }
+    png_bytes = tiny_png_bytes()
+    wall_file = UploadFile(filename="wall.png", file=BytesIO(png_bytes))
+
+    result = asyncio.run(main.create_job(
+        params=json.dumps(params),
+        dem_file=None,
+        route_file=None,
+        texture_wall_file=wall_file,
+    ))
+
+    assert result["job_id"] == captured["job_id"]
+    assert captured["params_data"]["enable_render_textures"] is True
+    assert captured["landmark_model_path"] is None
+    assert captured["texture_paths"]["ground"] is None
+    assert captured["texture_paths"]["roof"] is None
+    assert captured["vector_data_path"] is None
+    wall_path = captured["texture_paths"]["wall"]
+    assert wall_path is not None
+    assert wall_path.endswith("texture_wall.png")
+    assert (jobs / captured["job_id"] / "texture_wall.png").read_bytes() == png_bytes
+
+
+def test_create_job_rejects_invalid_render_texture_image(tmp_path, monkeypatch):
+    jobs = tmp_path / "jobs"
+    outputs = tmp_path / "outputs"
+    cache = tmp_path / "cache"
+    for path in (jobs, outputs, cache):
+        path.mkdir(parents=True)
+
+    def fake_submit_job(*args, **kwargs):
+        raise AssertionError("invalid texture should not submit a job")
+
+    monkeypatch.setattr(main, "JOBS_DIR", jobs)
+    monkeypatch.setattr(main, "OUTPUTS_DIR", outputs)
+    monkeypatch.setattr(main, "CACHE_DIR", cache)
+    monkeypatch.setattr(main, "submit_job", fake_submit_job)
+
+    params = {
+        "bbox": [47.62, -122.355, 47.626, -122.3455],
+        "enable_render_textures": True,
+    }
+    bad_file = UploadFile(filename="wall.png", file=BytesIO(b"not a real png"))
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(main.create_job(
+            params=json.dumps(params),
+            dem_file=None,
+            route_file=None,
+            texture_wall_file=bad_file,
+        ))
+
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "Texture uploads must be valid PNG, JPG, JPEG, or WebP images"
+
+
+def test_create_job_saves_uploaded_landmark_model(tmp_path, monkeypatch):
+    jobs = tmp_path / "jobs"
+    outputs = tmp_path / "outputs"
+    cache = tmp_path / "cache"
+    for path in (jobs, outputs, cache):
+        path.mkdir(parents=True)
+
+    captured = {}
+
+    def fake_submit_job(job_id, fn, params_data, dem_path, landmark_model_path, texture_paths, vector_data_path=None):
+        captured["job_id"] = job_id
+        captured["params_data"] = params_data
+        captured["dem_path"] = dem_path
+        captured["landmark_model_path"] = landmark_model_path
+        captured["texture_paths"] = texture_paths
+        captured["vector_data_path"] = vector_data_path
+
+    monkeypatch.setattr(main, "JOBS_DIR", jobs)
+    monkeypatch.setattr(main, "OUTPUTS_DIR", outputs)
+    monkeypatch.setattr(main, "CACHE_DIR", cache)
+    monkeypatch.setattr(main, "submit_job", fake_submit_job)
+
+    payload = b"solid landmark\nendsolid landmark\n"
+    landmark_file = UploadFile(filename="landmark.stl", file=BytesIO(payload))
+    params = {
+        "bbox": [47.62, -122.355, 47.626, -122.3455],
+        "include_landmark_replacement": True,
+        "landmark_osm_id": "way/300",
+    }
+
+    result = asyncio.run(main.create_job(
+        params=json.dumps(params),
+        dem_file=None,
+        route_file=None,
+        landmark_model_file=landmark_file,
+    ))
+
+    assert result["job_id"] == captured["job_id"]
+    landmark_path = captured["landmark_model_path"]
+    assert landmark_path is not None
+    assert landmark_path.endswith("landmark_model.stl")
+    assert (jobs / captured["job_id"] / "landmark_model.stl").read_bytes() == payload
+    assert captured["params_data"]["landmark_osm_id"] == "way/300"
+    assert captured["texture_paths"] == {"ground": None, "wall": None, "roof": None}
+    assert captured["vector_data_path"] is None
+
+
+def test_create_job_saves_uploaded_local_vector_geojson(tmp_path, monkeypatch):
+    jobs = tmp_path / "jobs"
+    outputs = tmp_path / "outputs"
+    cache = tmp_path / "cache"
+    for path in (jobs, outputs, cache):
+        path.mkdir(parents=True)
+
+    captured = {}
+
+    def fake_submit_job(job_id, fn, params_data, dem_path, landmark_model_path, texture_paths, vector_data_path=None):
+        captured["job_id"] = job_id
+        captured["params_data"] = params_data
+        captured["dem_path"] = dem_path
+        captured["landmark_model_path"] = landmark_model_path
+        captured["texture_paths"] = texture_paths
+        captured["vector_data_path"] = vector_data_path
+
+    monkeypatch.setattr(main, "JOBS_DIR", jobs)
+    monkeypatch.setattr(main, "OUTPUTS_DIR", outputs)
+    monkeypatch.setattr(main, "CACHE_DIR", cache)
+    monkeypatch.setattr(main, "submit_job", fake_submit_job)
+
+    payload = json.dumps({
+        "type": "FeatureCollection",
+        "features": [{
+            "type": "Feature",
+            "properties": {"topotile_layer": "building"},
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [[
+                    [116.3800, 39.9000],
+                    [116.3810, 39.9000],
+                    [116.3810, 39.9010],
+                    [116.3800, 39.9010],
+                    [116.3800, 39.9000],
+                ]],
+            },
+        }],
+    }).encode("utf-8")
+    vector_file = UploadFile(filename="china.geojson", file=BytesIO(payload))
+    params = {
+        "bbox": [39.899, 116.379, 39.902, 116.382],
+        "model_data_source": "local_vector",
+        "vector_coordinate_system": "wgs84",
+    }
+
+    result = asyncio.run(main.create_job(
+        params=json.dumps(params),
+        dem_file=None,
+        route_file=None,
+        vector_data_file=vector_file,
+    ))
+
+    assert result["job_id"] == captured["job_id"]
+    vector_path = captured["vector_data_path"]
+    assert vector_path is not None
+    assert vector_path.endswith("vector_data.geojson")
+    assert (jobs / captured["job_id"] / "vector_data.geojson").read_bytes() == payload
+    assert captured["params_data"]["model_data_source"] == "local_vector"
+
+
+def test_create_job_rejects_local_vector_without_geojson(tmp_path, monkeypatch):
+    jobs = tmp_path / "jobs"
+    outputs = tmp_path / "outputs"
+    cache = tmp_path / "cache"
+    for path in (jobs, outputs, cache):
+        path.mkdir(parents=True)
+
+    def fake_submit_job(*args, **kwargs):
+        raise AssertionError("missing vector data should not submit a job")
+
+    monkeypatch.setattr(main, "JOBS_DIR", jobs)
+    monkeypatch.setattr(main, "OUTPUTS_DIR", outputs)
+    monkeypatch.setattr(main, "CACHE_DIR", cache)
+    monkeypatch.setattr(main, "submit_job", fake_submit_job)
+
+    params = {
+        "bbox": [39.899, 116.379, 39.902, 116.382],
+        "model_data_source": "local_vector",
+    }
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(main.create_job(params=json.dumps(params), dem_file=None, route_file=None))
+
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "Local vector model data needs a GeoJSON file upload"
+
+
+def test_create_job_rejects_landmark_replacement_without_model(tmp_path, monkeypatch):
+    jobs = tmp_path / "jobs"
+    outputs = tmp_path / "outputs"
+    cache = tmp_path / "cache"
+    for path in (jobs, outputs, cache):
+        path.mkdir(parents=True)
+
+    def fake_submit_job(*args, **kwargs):
+        raise AssertionError("missing landmark model should not submit a job")
+
+    monkeypatch.setattr(main, "JOBS_DIR", jobs)
+    monkeypatch.setattr(main, "OUTPUTS_DIR", outputs)
+    monkeypatch.setattr(main, "CACHE_DIR", cache)
+    monkeypatch.setattr(main, "submit_job", fake_submit_job)
+
+    params = {
+        "bbox": [47.62, -122.355, 47.626, -122.3455],
+        "include_landmark_replacement": True,
+        "landmark_osm_id": "way/300",
+    }
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(main.create_job(params=json.dumps(params), dem_file=None, route_file=None))
+
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "Landmark replacement needs a GLB, GLTF, OBJ, STL, or DAE model upload"
 
 
 def test_cancel_running_job_marks_cancelling(tmp_path, monkeypatch):

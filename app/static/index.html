@@ -177,7 +177,7 @@
 </head>
 <body>
 <header>
-  <h1>TopoTile Studio / 3D地图工坊 <span class="app-version" id="appVersionLabel">v0.59</span></h1>
+  <h1>TopoTile Studio / 3D地图工坊 <span class="app-version" id="appVersionLabel">v0.65</span></h1>
   <div class="header-actions">
     <div class="author-name">Made by Wenshuishi</div>
     <div class="language-switch" aria-label="Language">
@@ -195,6 +195,50 @@
       <button id="addressSearchButton" type="button">Search</button>
     </div>
     <div class="small" id="addressSearchStatus">Search moves the current selection center to the result.</div>
+
+    <label>Data version</label>
+    <div class="segmented two" id="dataEditionMode">
+      <label><input type="radio" name="data_edition" value="international" checked><span>International data</span></label>
+      <label><input type="radio" name="data_edition" value="china"><span>China data</span></label>
+    </div>
+    <div class="small" id="dataEditionHelp">International keeps the current OpenStreetMap workflow. China data can switch the visible map source and, when you upload authorized GeoJSON, replace OSM model data.</div>
+    <div class="conditional-section hidden" id="chinaMapAdvanced">
+      <label>China map source</label>
+      <select id="china_map_source">
+        <option value="tianditu_vector" selected>Tianditu vector</option>
+        <option value="tianditu_imagery">Tianditu imagery</option>
+        <option value="custom_xyz">Custom XYZ tiles</option>
+      </select>
+      <div id="tiandituSettings">
+        <label>Tianditu token</label>
+        <input id="tianditu_token" type="password" autocomplete="off" placeholder="Enter your Tianditu token">
+      </div>
+      <div id="customTileSettings" class="hidden">
+        <label>Custom XYZ tile URL</label>
+        <input id="custom_tile_url" type="text" autocomplete="off" placeholder="https://example.com/{z}/{x}/{y}.png">
+        <label>Custom tile attribution</label>
+        <input id="custom_tile_attribution" type="text" placeholder="Map data attribution">
+      </div>
+      <div class="small" id="mapSourceStatus">China map settings are saved in this browser only. 3D generation still uses the same WGS84 selection coordinates.</div>
+      <label>China model data source</label>
+      <select id="model_data_source">
+        <option value="osm" selected>OSM model data fallback</option>
+        <option value="local_vector">Local authorized GeoJSON</option>
+      </select>
+      <div class="conditional-section hidden" id="localVectorSettings">
+        <label>Vector GeoJSON file</label>
+        <input id="vector_data_file" type="file" accept=".geojson,.json,application/geo+json,application/json">
+        <label>Vector coordinate system</label>
+        <select id="vector_coordinate_system">
+          <option value="wgs84" selected>WGS84</option>
+          <option value="gcj02">GCJ-02</option>
+          <option value="bd09">BD-09</option>
+        </select>
+        <label>Vector data attribution</label>
+        <textarea id="vector_data_attribution" rows="2" placeholder="Example: Authorized city GIS data, 2026"></textarea>
+        <div class="small">GeoJSON can replace OSM model data for buildings, roads, water, green, parking, airport, rail, subway, and area infill. Use only data you are licensed to export.</div>
+      </div>
+    </div>
 
     <label>Project</label>
     <div class="button-row">
@@ -335,6 +379,27 @@
       <div class="small" id="routeStatus">Upload a GPX or KML track to print it as a raised line over the model.</div>
     </div>
 
+    <label>Landmark replacement</label>
+    <div class="checks">
+      <label class="check"><input id="include_landmark_replacement" type="checkbox"> Replace one OSM building with uploaded model</label>
+    </div>
+    <div class="conditional-section hidden" id="landmarkAdvanced">
+      <label>Landmark model file</label>
+      <input id="landmark_model_file" type="file" accept=".glb,.gltf,.obj,.stl,.dae,model/gltf-binary,model/gltf+json">
+      <label>Target OSM building ID</label>
+      <input id="landmark_osm_id" type="text" placeholder="Example: way/123456789">
+      <div class="row">
+        <div><label>Model scale</label><input id="landmark_scale" type="number" value="1" min="0.001" max="1000" step="0.01"></div>
+        <div><label>Rotation, degrees</label><input id="landmark_rotation_deg" type="number" value="0" step="1"></div>
+        <div><label>Z offset, mm</label><input id="landmark_z_offset_mm" type="number" value="0" min="-200" max="200" step="0.1"></div>
+      </div>
+      <div class="checks">
+        <label class="check"><input id="landmark_fit_to_footprint" type="checkbox" checked> Fit model to target footprint</label>
+        <label class="check"><input id="landmark_replace_original" type="checkbox" checked> Remove original OSM building</label>
+      </div>
+      <div class="small" id="landmarkStatus">Upload a GLB, GLTF, OBJ, STL, or DAE model and enter the OSM building ID to replace. Use scale, rotation, and Z offset for manual alignment.</div>
+    </div>
+
     <label>Optional DEM GeoTIFF</label>
     <input id="dem_file" type="file" accept=".tif,.tiff" />
     <div class="small">Uploaded DEM files override automatic terrain.</div>
@@ -360,6 +425,24 @@
     </div>
     <div class="small">Keeps the web preview colors unchanged, but writes stable print colors into the 3MF: green land, blue water, gray roads, and white buildings/parking/area infill.</div>
 
+    <label>Render textures</label>
+    <div class="checks">
+      <label class="check"><input id="enable_render_textures" type="checkbox"> Preview / GLB textures</label>
+    </div>
+    <div class="conditional-section hidden" id="textureAdvanced">
+      <label>Ground texture image</label>
+      <input id="texture_ground_file" type="file" accept="image/png,image/jpeg,image/webp">
+      <label>Building wall texture image</label>
+      <input id="texture_wall_file" type="file" accept="image/png,image/jpeg,image/webp">
+      <label>Building roof texture image</label>
+      <input id="texture_roof_file" type="file" accept="image/png,image/jpeg,image/webp">
+      <div class="row">
+        <div><label>Wall repeat, mm</label><input id="texture_wall_repeat_mm" type="number" value="12" min="0.5" max="200" step="0.5"></div>
+        <div><label>Roof repeat, mm</label><input id="texture_roof_repeat_mm" type="number" value="18" min="0.5" max="200" step="0.5"></div>
+      </div>
+      <div class="small" id="textureStatus">Textures affect only the web preview and GLB download. 3MF print colors stay unchanged.</div>
+    </div>
+
     <button class="secondary" id="sample" type="button">Offline Test Model</button>
     <div class="small">Built-in sample: generates a test model without internet.</div>
 
@@ -367,7 +450,7 @@
     <div class="checks">
       <label class="check"><input id="auto_repair_mesh" type="checkbox" checked> Auto repair non-manifold edges</label>
     </div>
-    <div class="small">Runs before 3MF/GLB/STL export. It removes common degenerate/duplicate geometry and reports any remaining mesh issues.</div>
+    <div class="small">Runs before 3MF/GLB/DAE/STL export. It removes common degenerate/duplicate geometry and reports any remaining mesh issues.</div>
 
     <button class="primary" id="generate">Generate 3MF</button>
     <a class="download-primary disabled" id="download3mf" href="#" download>Download 3MF</a>
@@ -402,7 +485,7 @@
   </section>
 </main>
 <script>
-  const APP_VERSION = '0.59';
+  const APP_VERSION = '0.65';
   document.getElementById('appVersionLabel').textContent = `v${APP_VERSION}`;
 
   const LANGUAGE_STORAGE_KEY = 'topotile.language';
@@ -411,6 +494,38 @@
     'Address search': '地址搜索',
     'Search': '搜索',
     'Search moves the current selection center to the result.': '搜索后会把当前选择框中心移动到结果位置。',
+    'Data version': '数据版本',
+    'International data': '国外数据版',
+    'China data': '国内数据版',
+    'International keeps the current OpenStreetMap workflow. China data can switch the visible map source and, when you upload authorized GeoJSON, replace OSM model data.': '国外数据版保持当前 OpenStreetMap 流程。国内数据版可以切换可见地图源，并在上传授权 GeoJSON 后替换 OSM 模型数据。',
+    'China map source': '国内地图源',
+    'Tianditu vector': '天地图矢量',
+    'Tianditu imagery': '天地图影像',
+    'Custom XYZ tiles': '自定义 XYZ 瓦片',
+    'Tianditu token': '天地图 Token',
+    'Enter your Tianditu token': '输入你的天地图 Token',
+    'Custom XYZ tile URL': '自定义 XYZ 瓦片 URL',
+    'https://example.com/{z}/{x}/{y}.png': 'https://example.com/{z}/{x}/{y}.png',
+    'Custom tile attribution': '自定义瓦片署名',
+    'Map data attribution': '地图数据署名',
+    'China map settings are saved in this browser only. 3D generation still uses the same WGS84 selection coordinates.': '国内地图设置只保存在当前浏览器。本软件生成 3D 模型时仍使用同一套 WGS84 选择坐标。',
+    'China model data source': '国内模型数据源',
+    'OSM model data fallback': '使用 OSM 模型数据',
+    'Local authorized GeoJSON': '本地授权 GeoJSON',
+    'Vector GeoJSON file': '矢量 GeoJSON 文件',
+    'Vector coordinate system': '矢量坐标系',
+    'Vector data attribution': '矢量数据署名',
+    'Example: Authorized city GIS data, 2026': '例如：某城市授权 GIS 数据，2026',
+    'GeoJSON can replace OSM model data for buildings, roads, water, green, parking, airport, rail, subway, and area infill. Use only data you are licensed to export.': 'GeoJSON 可以替换建筑、道路、水体、绿地、停车场、机场、铁路、地铁和区域补面的 OSM 模型数据。请只使用你有权导出的数据。',
+    'Model data source: {source}': '模型数据源：{source}',
+    'Local vector data: {features} features, skipped {skipped}': '本地矢量数据：{features} 个要素，跳过 {skipped} 个',
+    'Using OpenStreetMap international map source.': '正在使用 OpenStreetMap 国外地图源。',
+    'Using Tianditu vector map source.': '正在使用天地图矢量地图源。',
+    'Using Tianditu imagery map source.': '正在使用天地图影像地图源。',
+    'Enter a Tianditu token to load this domestic map source. OpenStreetMap is shown until then.': '请输入天地图 Token 后加载这个国内地图源。在此之前继续显示 OpenStreetMap。',
+    'Enter a custom XYZ URL containing {z}, {x}, and {y}. OpenStreetMap is shown until then.': '请输入包含 {z}、{x}、{y} 的自定义 XYZ URL。在此之前继续显示 OpenStreetMap。',
+    'Using custom XYZ map source.': '正在使用自定义 XYZ 地图源。',
+    'Map source failed to load; OpenStreetMap is shown instead.': '地图源加载失败，已改为显示 OpenStreetMap。',
     'Project': '项目',
     'Save project': '保存项目',
     'Load project': '加载项目',
@@ -424,6 +539,18 @@
     'Normal': '普通模式',
     'High detail': '高细节模式',
     'Normal keeps the current simplified printable buildings. High detail uses OSM building parts, min-height, and OSM roof shapes when available.': '普通模式保持当前简化、稳定、适合打印的建筑。高细节模式会在有数据时使用 OSM 建筑部件、离地高度和 OSM 屋顶形状。',
+    'Landmark replacement': '地标替换',
+    'Replace one OSM building with uploaded model': '用上传模型替换一个 OSM 建筑',
+    'Landmark model file': '地标模型文件',
+    'Target OSM building ID': '目标 OSM 建筑 ID',
+    'Example: way/123456789': '例如：way/123456789',
+    'Model scale': '模型比例',
+    'Rotation, degrees': '旋转角度',
+    'Z offset, mm': 'Z 偏移，mm',
+    'Fit model to target footprint': '自动适配目标轮廓',
+    'Remove original OSM building': '移除原 OSM 建筑',
+    'Upload a GLB, GLTF, OBJ, STL, or DAE model and enter the OSM building ID to replace. Use scale, rotation, and Z offset for manual alignment.': '上传 GLB、GLTF、OBJ、STL 或 DAE 模型，并输入要替换的 OSM 建筑 ID。可用比例、旋转和 Z 偏移手动对齐。',
+    'Landmark replacement: {status}, target {target}, removed {removed} original building(s)': '地标替换：{status}，目标 {target}，移除 {removed} 个原建筑',
     'Selection': '选择框',
     'Free': '自由',
     'Circle': '圆形',
@@ -524,9 +651,20 @@
     'Export options': '导出选项',
     '3MF print color groups': '3MF 打印图层分色',
     'Keeps the web preview colors unchanged, but writes stable print colors into the 3MF: green land, blue water, gray roads, and white buildings/parking/area infill.': '网页预览颜色保持不变，只在 3MF 中写入稳定打印颜色：绿地为绿色，水系为蓝色，道路为灰色，建筑/停车场/补区为白色。',
+    'Render textures': '渲染贴图',
+    'Preview / GLB textures': '预览 / GLB 贴图',
+    'Ground texture image': '地面贴图图片',
+    'Building wall texture image': '建筑墙面贴图图片',
+    'Building roof texture image': '建筑屋顶贴图图片',
+    'Wall repeat, mm': '墙面重复尺寸，mm',
+    'Roof repeat, mm': '屋顶重复尺寸，mm',
+    'Textures affect only the web preview and GLB download. 3MF print colors stay unchanged.': '贴图只影响网页预览和 GLB 下载。3MF 打印颜色保持不变。',
+    'Render textures: ground {ground}, walls {walls}, roofs {roofs}': '渲染贴图：地面 {ground}，墙面 {walls}，屋顶 {roofs}',
+    'on': '开启',
+    'off': '关闭',
     'Mesh repair': '网格修复',
     'Auto repair non-manifold edges': '自动修复非流形边',
-    'Runs before 3MF/GLB/STL export. It removes common degenerate/duplicate geometry and reports any remaining mesh issues.': '在导出 3MF/GLB/STL 前运行。会移除常见退化/重复几何，并报告剩余网格问题。',
+    'Runs before 3MF/GLB/DAE/STL export. It removes common degenerate/duplicate geometry and reports any remaining mesh issues.': '在导出 3MF/GLB/DAE/STL 前运行。会移除常见退化/重复几何，并报告剩余网格问题。',
     'Generate 3MF': '生成 3MF',
     'Download 3MF': '下载 3MF',
     'Download chunk ZIP': '下载分块 ZIP',
@@ -599,6 +737,7 @@
     'No API key or registration is required for normal Overpass use. Try dragging the selection box smaller, or retry later if the public server is busy.': '正常使用 Overpass 不需要 API key 或注册。请尝试缩小选择框；如果公共服务器繁忙，稍后再试。',
     'Auto terrain uses a public elevation service and does not require registration. Turn it off or upload a DEM GeoTIFF if the service is busy.': '自动地形使用公共高程服务，不需要注册。如果服务繁忙，请关闭它或上传 DEM GeoTIFF。',
     'Download GLB': '下载 GLB',
+    'Download SketchUp (.dae)': '下载 SketchUp (.dae)',
     'Download STL': '下载 STL',
     'Attribution': '署名',
     'Project JSON': '项目 JSON',
@@ -690,6 +829,7 @@
     'jobs': '任务文件',
     'outputs': '输出文件',
     'osm': 'OSM 缓存',
+    'local_vector': '本地授权 GeoJSON',
     'elevation': '高程缓存',
     'terrain': '地形缓存',
   };
@@ -775,15 +915,184 @@
     if (typeof renderRouteControls === 'function') renderRouteControls();
     if (typeof updateRouteStatus === 'function') updateRouteStatus();
     if (typeof updateConditionalSections === 'function') updateConditionalSections();
+    if (typeof updateDataEditionControls === 'function') updateDataEditionControls(false);
     if (typeof updateJobControls === 'function') updateJobControls();
     if (typeof refreshCacheStatus === 'function') refreshCacheStatus();
   }
 
   const map = L.map('map').setView([47.623, -122.350], 15);
-  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 19,
-    attribution: '&copy; OpenStreetMap contributors'
-  }).addTo(map);
+  const MAP_DISPLAY_STORAGE_KEY = 'topotile.mapDisplay';
+  const TIAN_DI_TU_SUBDOMAINS = ['0', '1', '2', '3', '4', '5', '6', '7'];
+  let activeMapLayers = [];
+  let mapSourceApplyTimer = null;
+
+  function dataEdition() {
+    const selected = document.querySelector('input[name="data_edition"]:checked');
+    return selected ? selected.value : 'international';
+  }
+
+  function chinaMapSource() {
+    const source = document.getElementById('china_map_source');
+    return source ? source.value : 'tianditu_vector';
+  }
+
+  function modelDataSource() {
+    if (dataEdition() !== 'china') return 'osm';
+    const source = document.getElementById('model_data_source');
+    return source ? source.value : 'osm';
+  }
+
+  function mapDisplaySettings(includeSecrets = true) {
+    const settings = {
+      data_edition: dataEdition(),
+      china_map_source: chinaMapSource(),
+    };
+    if (includeSecrets) {
+      settings.tianditu_token = document.getElementById('tianditu_token').value.trim();
+      settings.custom_tile_url = document.getElementById('custom_tile_url').value.trim();
+      settings.custom_tile_attribution = document.getElementById('custom_tile_attribution').value.trim();
+    }
+    return settings;
+  }
+
+  function saveMapDisplaySettings() {
+    localStorage.setItem(MAP_DISPLAY_STORAGE_KEY, JSON.stringify(mapDisplaySettings(true)));
+  }
+
+  function restoreMapDisplaySettings() {
+    let settings = {};
+    try {
+      settings = JSON.parse(localStorage.getItem(MAP_DISPLAY_STORAGE_KEY) || '{}');
+    } catch (_err) {
+      settings = {};
+    }
+    const edition = settings.data_edition === 'china' ? 'china' : 'international';
+    const editionInput = document.querySelector(`input[name="data_edition"][value="${edition}"]`);
+    if (editionInput) editionInput.checked = true;
+    const source = document.getElementById('china_map_source');
+    if (source && ['tianditu_vector', 'tianditu_imagery', 'custom_xyz'].includes(settings.china_map_source)) {
+      source.value = settings.china_map_source;
+    }
+    if (settings.tianditu_token) document.getElementById('tianditu_token').value = settings.tianditu_token;
+    if (settings.custom_tile_url) document.getElementById('custom_tile_url').value = settings.custom_tile_url;
+    if (settings.custom_tile_attribution) document.getElementById('custom_tile_attribution').value = settings.custom_tile_attribution;
+  }
+
+  function clearMapLayers() {
+    activeMapLayers.forEach(layer => map.removeLayer(layer));
+    activeMapLayers = [];
+  }
+
+  function addMapLayer(url, options) {
+    const layer = L.tileLayer(url, options).addTo(map);
+    activeMapLayers.push(layer);
+    return layer;
+  }
+
+  function addOpenStreetMapLayer() {
+    addMapLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap contributors',
+    });
+  }
+
+  function tiandituLayerUrl(layerCode, token) {
+    return `https://t{s}.tianditu.gov.cn/DataServer?T=${layerCode}&x={x}&y={y}&l={z}&tk=${encodeURIComponent(token)}`;
+  }
+
+  function addTiandituLayers(source, token) {
+    const isImagery = source === 'tianditu_imagery';
+    const baseCode = isImagery ? 'img_w' : 'vec_w';
+    const labelCode = isImagery ? 'cia_w' : 'cva_w';
+    const common = {
+      maxZoom: 18,
+      subdomains: TIAN_DI_TU_SUBDOMAINS,
+      attribution: '&copy; Tianditu',
+    };
+    addMapLayer(tiandituLayerUrl(baseCode, token), common);
+    addMapLayer(tiandituLayerUrl(labelCode, token), {...common, pane: 'overlayPane'});
+  }
+
+  function xyzUrlLooksValid(url) {
+    return url.includes('{z}') && url.includes('{x}') && url.includes('{y}');
+  }
+
+  function setMapSourceStatus(message) {
+    const status = document.getElementById('mapSourceStatus');
+    if (status) status.textContent = tr(message);
+  }
+
+  function applyMapSource(persist = true) {
+    const settings = mapDisplaySettings(true);
+    if (persist) saveMapDisplaySettings();
+    clearMapLayers();
+    try {
+      if (settings.data_edition !== 'china') {
+        addOpenStreetMapLayer();
+        setMapSourceStatus('Using OpenStreetMap international map source.');
+        return;
+      }
+      if (settings.china_map_source === 'custom_xyz') {
+        if (!xyzUrlLooksValid(settings.custom_tile_url)) {
+          addOpenStreetMapLayer();
+          setMapSourceStatus('Enter a custom XYZ URL containing {z}, {x}, and {y}. OpenStreetMap is shown until then.');
+          return;
+        }
+        addMapLayer(settings.custom_tile_url, {
+          maxZoom: 19,
+          attribution: settings.custom_tile_attribution || '',
+        });
+        setMapSourceStatus('Using custom XYZ map source.');
+        return;
+      }
+      if (!settings.tianditu_token) {
+        addOpenStreetMapLayer();
+        setMapSourceStatus('Enter a Tianditu token to load this domestic map source. OpenStreetMap is shown until then.');
+        return;
+      }
+      addTiandituLayers(settings.china_map_source, settings.tianditu_token);
+      setMapSourceStatus(settings.china_map_source === 'tianditu_imagery' ? 'Using Tianditu imagery map source.' : 'Using Tianditu vector map source.');
+    } catch (_err) {
+      clearMapLayers();
+      addOpenStreetMapLayer();
+      setMapSourceStatus('Map source failed to load; OpenStreetMap is shown instead.');
+    }
+  }
+
+  function scheduleMapSourceApply() {
+    saveMapDisplaySettings();
+    window.clearTimeout(mapSourceApplyTimer);
+    mapSourceApplyTimer = window.setTimeout(() => applyMapSource(false), 350);
+  }
+
+  function updateDataEditionControls(persist = true) {
+    const isChina = dataEdition() === 'china';
+    const isCustom = chinaMapSource() === 'custom_xyz';
+    setConditionalVisible('chinaMapAdvanced', isChina);
+    setConditionalVisible('tiandituSettings', isChina && !isCustom);
+    setConditionalVisible('customTileSettings', isChina && isCustom);
+    setConditionalVisible('localVectorSettings', isChina && modelDataSource() === 'local_vector');
+    applyMapSource(persist);
+  }
+
+  restoreMapDisplaySettings();
+  updateDataEditionControls(false);
+
+  document.querySelectorAll('input[name="data_edition"]').forEach(input => {
+    input.addEventListener('change', () => updateDataEditionControls());
+  });
+  document.getElementById('china_map_source').addEventListener('change', () => updateDataEditionControls());
+  document.getElementById('model_data_source').addEventListener('change', () => {
+    updateConditionalSections();
+    saveMapDisplaySettings();
+  });
+  ['tianditu_token', 'custom_tile_url', 'custom_tile_attribution'].forEach(id => {
+    const input = document.getElementById(id);
+    input.addEventListener('change', () => applyMapSource());
+    input.addEventListener('blur', () => applyMapSource());
+    input.addEventListener('input', scheduleMapSourceApply);
+  });
+
   let bboxRect = null;
   let cornerMarkers = [];
   let edgeMarkers = [];
@@ -1984,6 +2293,7 @@
       version: 2,
       saved_at: new Date().toISOString(),
       selection_mode: selectionMode(),
+      map_display: mapDisplaySettings(false),
       params: params(),
     };
     downloadJson(`${name || 'topotile'}_project.json`, payload);
@@ -1992,14 +2302,24 @@
 
   function applyProjectParams(saved) {
     const p = saved.params || saved;
-    const numericIds = ['south','west','north','east','max_size_mm','base_thickness_mm','vertical_exaggeration','terrain_grid_size','building_height_multiplier','max_building_height_mm','default_building_height_m','min_road_width_mm','footway_width_mm','pedestrian_width_mm','bridge_clearance_mm','area_infill_height_mm','max_terrain_height_mm','terrain_tile_zoom','osm_tile_size_km','road_cleaning_level','chunk_rows','chunk_cols'];
+    if (saved.map_display) {
+      const edition = saved.map_display.data_edition === 'china' ? 'china' : 'international';
+      const editionInput = document.querySelector(`input[name="data_edition"][value="${edition}"]`);
+      if (editionInput) editionInput.checked = true;
+      const source = document.getElementById('china_map_source');
+      if (source && ['tianditu_vector', 'tianditu_imagery', 'custom_xyz'].includes(saved.map_display.china_map_source)) {
+        source.value = saved.map_display.china_map_source;
+      }
+      updateDataEditionControls();
+    }
+    const numericIds = ['south','west','north','east','max_size_mm','base_thickness_mm','vertical_exaggeration','terrain_grid_size','building_height_multiplier','max_building_height_mm','default_building_height_m','min_road_width_mm','footway_width_mm','pedestrian_width_mm','bridge_clearance_mm','area_infill_height_mm','max_terrain_height_mm','terrain_tile_zoom','osm_tile_size_km','road_cleaning_level','chunk_rows','chunk_cols','texture_wall_repeat_mm','texture_roof_repeat_mm','landmark_scale','landmark_rotation_deg','landmark_z_offset_mm'];
     numericIds.forEach(id => {
       if (p[id] !== undefined && document.getElementById(id)) document.getElementById(id).value = p[id];
     });
     if (p.export_print_color_groups === undefined && p.random_export_colors !== undefined) {
       p.export_print_color_groups = p.random_export_colors;
     }
-    const boolIds = ['large_map_mode','auto_terrain','include_buildings','include_roads','include_water','cut_out_water','include_green','include_parking','include_airport','include_area_infill','include_rail_lines','include_rail_stations','include_subway_lines','include_subway_stations','include_route','chunk_export','auto_repair_mesh','export_print_color_groups'];
+    const boolIds = ['large_map_mode','auto_terrain','include_buildings','include_roads','include_water','cut_out_water','include_green','include_parking','include_airport','include_area_infill','include_rail_lines','include_rail_stations','include_subway_lines','include_subway_stations','include_landmark_replacement','landmark_fit_to_footprint','landmark_replace_original','include_route','chunk_export','auto_repair_mesh','export_print_color_groups','enable_render_textures'];
     boolIds.forEach(id => {
       if (p[id] !== undefined && document.getElementById(id)) document.getElementById(id).checked = Boolean(p[id]);
     });
@@ -2012,10 +2332,24 @@
       areaInfillMode.value = p.area_infill_mode || 'empty_areas';
       if (!areaInfillMode.value) areaInfillMode.value = 'empty_areas';
     }
+    const modelData = document.getElementById('model_data_source');
+    if (modelData && ['osm', 'local_vector'].includes(p.model_data_source)) {
+      modelData.value = p.model_data_source;
+      if (p.model_data_source === 'local_vector') {
+        const chinaInput = document.querySelector('input[name="data_edition"][value="china"]');
+        if (chinaInput) chinaInput.checked = true;
+      }
+    }
+    const vectorCoord = document.getElementById('vector_coordinate_system');
+    if (vectorCoord && ['wgs84', 'gcj02', 'bd09'].includes(p.vector_coordinate_system)) {
+      vectorCoord.value = p.vector_coordinate_system;
+    }
     const detailMode = p.model_detail_mode || 'normal';
     const detailSelected = document.querySelector(`input[name="model_detail_mode"][value="${detailMode}"]`);
     if (detailSelected) detailSelected.checked = true;
     if (p.output_name !== undefined) document.getElementById('output_name').value = p.output_name;
+    if (p.landmark_osm_id !== undefined) document.getElementById('landmark_osm_id').value = p.landmark_osm_id;
+    if (p.vector_data_attribution !== undefined) document.getElementById('vector_data_attribution').value = p.vector_data_attribution;
     if (p.dem_attribution !== undefined) document.getElementById('dem_attribution').value = p.dem_attribution;
     setRoutesFromProject(p);
     if (p.include_route === undefined && activeRouteConfigs().length) document.getElementById('include_route').checked = true;
@@ -2030,6 +2364,7 @@
     updateRoadCleaningStatus();
     updateTerrainModeStatus();
     updateConditionalSections();
+    updateDataEditionControls();
     if (Array.isArray(p.road_levels)) setRoadLevels(p.road_levels);
     drawRect();
   }
@@ -2063,11 +2398,13 @@
   document.getElementById('auto_terrain').addEventListener('change', updateTerrainModeStatus);
   document.getElementById('dem_file').addEventListener('change', updateTerrainModeStatus);
   document.getElementById('include_area_infill').addEventListener('change', updateConditionalSections);
+  document.getElementById('include_landmark_replacement').addEventListener('change', updateConditionalSections);
   document.getElementById('include_route').addEventListener('change', () => {
     updateConditionalSections();
     updateRouteStatus();
   });
   document.getElementById('chunk_export').addEventListener('change', updateConditionalSections);
+  document.getElementById('enable_render_textures').addEventListener('change', updateConditionalSections);
 
   function setConditionalVisible(id, visible) {
     const node = document.getElementById(id);
@@ -2079,8 +2416,11 @@
     const hasDem = Boolean(document.getElementById('dem_file').files[0]);
     setConditionalVisible('terrainAdvanced', auto || hasDem);
     setConditionalVisible('areaInfillAdvanced', document.getElementById('include_area_infill').checked);
+    setConditionalVisible('landmarkAdvanced', document.getElementById('include_landmark_replacement').checked);
     setConditionalVisible('routeAdvanced', document.getElementById('include_route').checked);
     setConditionalVisible('chunkAdvanced', document.getElementById('chunk_export').checked);
+    setConditionalVisible('textureAdvanced', document.getElementById('enable_render_textures').checked);
+    setConditionalVisible('localVectorSettings', dataEdition() === 'china' && modelDataSource() === 'local_vector');
   }
 
   function updateTerrainModeStatus() {
@@ -2109,7 +2449,7 @@
   updateConditionalSections();
 
   function params() {
-    const ids = ['south','west','north','east','max_size_mm','base_thickness_mm','vertical_exaggeration','terrain_grid_size','building_height_multiplier','max_building_height_mm','default_building_height_m','min_road_width_mm','footway_width_mm','pedestrian_width_mm','bridge_clearance_mm','area_infill_height_mm','max_terrain_height_mm','terrain_tile_zoom','osm_tile_size_km','road_cleaning_level','chunk_rows','chunk_cols'];
+    const ids = ['south','west','north','east','max_size_mm','base_thickness_mm','vertical_exaggeration','terrain_grid_size','building_height_multiplier','max_building_height_mm','default_building_height_m','min_road_width_mm','footway_width_mm','pedestrian_width_mm','bridge_clearance_mm','area_infill_height_mm','max_terrain_height_mm','terrain_tile_zoom','osm_tile_size_km','road_cleaning_level','chunk_rows','chunk_cols','texture_wall_repeat_mm','texture_roof_repeat_mm','landmark_scale','landmark_rotation_deg','landmark_z_offset_mm'];
     const p = {};
     ids.forEach(id => p[id] = parseFloat(document.getElementById(id).value));
     p.large_map_mode = document.getElementById('large_map_mode').checked;
@@ -2122,6 +2462,11 @@
     p.chunk_export = document.getElementById('chunk_export').checked;
     p.auto_repair_mesh = document.getElementById('auto_repair_mesh').checked;
     p.export_print_color_groups = document.getElementById('export_print_color_groups').checked;
+    p.enable_render_textures = document.getElementById('enable_render_textures').checked;
+    p.include_landmark_replacement = document.getElementById('include_landmark_replacement').checked;
+    p.landmark_fit_to_footprint = document.getElementById('landmark_fit_to_footprint').checked;
+    p.landmark_replace_original = document.getElementById('landmark_replace_original').checked;
+    p.landmark_osm_id = document.getElementById('landmark_osm_id').value.trim();
     p.selection_shape = selectionShape();
     p.include_green = document.getElementById('include_green').checked;
     p.include_parking = document.getElementById('include_parking').checked;
@@ -2134,6 +2479,9 @@
     p.include_route = document.getElementById('include_route').checked;
     p.area_infill_mode = document.getElementById('area_infill_mode').value;
     p.model_detail_mode = modelDetailMode();
+    p.model_data_source = modelDataSource();
+    p.vector_coordinate_system = document.getElementById('vector_coordinate_system').value;
+    p.vector_data_attribution = document.getElementById('vector_data_attribution').value;
     p.dem_attribution = document.getElementById('dem_attribution').value;
     p.output_name = document.getElementById('output_name').value.trim() || 'city_model';
     p.project_name = p.output_name;
@@ -2224,6 +2572,16 @@
         statusEl.textContent += `\n\n${tr('Area: {width} m × {height} m', {width: s.area_width_m.toFixed(1), height: s.area_height_m.toFixed(1)})}`;
         statusEl.textContent += `\n${tr('Model: {width} mm × {height} mm', {width: s.model_width_mm.toFixed(1), height: s.model_height_mm.toFixed(1)})}`;
         if (s.output_name) statusEl.textContent += `\n${tr('File name: {name}', {name: s.output_name})}`;
+        if (s.model_data_source) {
+          const sourceName = s.model_data_source.source === 'local_vector' ? 'Local authorized GeoJSON' : 'OSM model data fallback';
+          statusEl.textContent += `\n${tr('Model data source: {source}', {source: tr(sourceName)})}`;
+          if (s.model_data_source.local_vector) {
+            statusEl.textContent += `\n${tr('Local vector data: {features} features, skipped {skipped}', {
+              features: s.model_data_source.local_vector.features || 0,
+              skipped: s.model_data_source.local_vector.skipped || 0,
+            })}`;
+          }
+        }
         if (s.terrain) statusEl.textContent += `\n${tr('Terrain: {source}, relief {relief} mm', {source: tr(s.terrain.source), relief: s.terrain.relief_mm.toFixed(1)})}`;
         if (s.water_cutout && s.water_cutout.enabled) statusEl.textContent += `\n${tr('Water cutout: on ({count} polygons)', {count: s.water_cutout.polygons})}`;
         if (s.selection_shape) statusEl.textContent += `\n${tr('Selection shape: {shape}', {shape: tr(s.selection_shape)})}`;
@@ -2247,6 +2605,20 @@
         if (s.selected_road_levels) statusEl.textContent += `\n${tr('Road levels: {levels}', {levels: s.selected_road_levels.join(', ') || tr('none')})}`;
         if (s.chunk_export && s.chunk_export.enabled) statusEl.textContent += `\n${tr('Chunks: {rows} × {cols} ({pieces} files)', {rows: s.chunk_export.rows, cols: s.chunk_export.cols, pieces: s.chunk_export.pieces})}`;
         if (s.export_print_color_groups && s.export_print_color_groups.enabled) statusEl.textContent += `\n${tr('3MF print color groups: on')}`;
+        if (s.render_textures && s.render_textures.enabled) {
+          statusEl.textContent += `\n${tr('Render textures: ground {ground}, walls {walls}, roofs {roofs}', {
+            ground: tr(s.render_textures.ground ? 'on' : 'off'),
+            walls: tr(s.render_textures.walls ? 'on' : 'off'),
+            roofs: tr(s.render_textures.roofs ? 'on' : 'off'),
+          })}`;
+        }
+        if (s.landmark_replacement && s.landmark_replacement.enabled) {
+          statusEl.textContent += `\n${tr('Landmark replacement: {status}, target {target}, removed {removed} original building(s)', {
+            status: tr(s.landmark_replacement.status || 'unknown'),
+            target: s.landmark_replacement.matched_osm_id || s.landmark_replacement.target_osm_id || '',
+            removed: s.landmark_replacement.removed_buildings || 0,
+          })}`;
+        }
         if (s.printability) {
           statusEl.textContent += `\n${tr('Printability: {score}/100 {grade}', {score: s.printability.score, grade: s.printability.grade})}`;
           const issues = (s.printability.issues || []).slice(0, 4);
@@ -2277,6 +2649,7 @@
           <a href="${data.downloads['3mf']}">${tr('Download 3MF')}</a>
           ${data.downloads.chunks ? `<a href="${data.downloads.chunks}">${tr('Download chunk ZIP')}</a>` : ''}
           <a href="${data.downloads.glb}">${tr('Download GLB')}</a>
+          ${data.downloads.dae ? `<a href="${data.downloads.dae}">${tr('Download SketchUp (.dae)')}</a>` : ''}
           <a href="${data.downloads.stl}">${tr('Download STL')}</a>
           <a href="${data.downloads.attribution}">${tr('Attribution')}</a>
           ${data.downloads.project ? `<a href="${data.downloads.project}">${tr('Project JSON')}</a>` : ''}
@@ -2327,6 +2700,24 @@
     form.append('params', JSON.stringify(params()));
     const dem = document.getElementById('dem_file').files[0];
     if (dem) form.append('dem_file', dem);
+    if (document.getElementById('include_landmark_replacement').checked) {
+      const landmarkModel = document.getElementById('landmark_model_file').files[0];
+      if (landmarkModel) form.append('landmark_model_file', landmarkModel);
+    }
+    if (document.getElementById('enable_render_textures').checked) {
+      [
+        ['texture_ground_file', 'texture_ground_file'],
+        ['texture_wall_file', 'texture_wall_file'],
+        ['texture_roof_file', 'texture_roof_file'],
+      ].forEach(([fieldName, inputId]) => {
+        const file = document.getElementById(inputId).files[0];
+        if (file) form.append(fieldName, file);
+      });
+    }
+    if (modelDataSource() === 'local_vector') {
+      const vectorData = document.getElementById('vector_data_file').files[0];
+      if (vectorData) form.append('vector_data_file', vectorData);
+    }
     try {
       const res = await fetch('/api/jobs', {method: 'POST', body: form});
       const data = await res.json();

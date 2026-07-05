@@ -3,6 +3,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import Future
 from datetime import datetime
+from io import BytesIO
 from pathlib import Path
 from threading import Lock
 from urllib.parse import quote
@@ -16,6 +17,7 @@ import requests
 from fastapi import Body, FastAPI, UploadFile, File, Form, HTTPException, Query
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
+from PIL import Image, UnidentifiedImageError
 
 from city_modeler.cancel import GenerationCancelled
 from city_modeler.params import ModelParams
@@ -30,6 +32,12 @@ CACHE_DIR = DATA_DIR / "cache"
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 NOMINATIM_SEARCH_URL = "https://nominatim.openstreetmap.org/search"
 GEOCODE_USER_AGENT = "TopoTile-Studio/0.1 (local desktop 3D-printing app)"
+TEXTURE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp"}
+TEXTURE_MAX_BYTES = 12 * 1024 * 1024
+LANDMARK_MODEL_SUFFIXES = {".glb", ".gltf", ".obj", ".stl", ".dae"}
+LANDMARK_MODEL_MAX_BYTES = 120 * 1024 * 1024
+VECTOR_DATA_SUFFIXES = {".geojson", ".json"}
+VECTOR_DATA_MAX_BYTES = 80 * 1024 * 1024
 
 JOBS_DIR.mkdir(parents=True, exist_ok=True)
 OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -56,6 +64,20 @@ def status_path(job_id: str) -> Path:
 
 def cancel_path(job_id: str) -> Path:
     return job_dir(job_id) / "cancel.requested"
+
+
+def validate_texture_payload(payload: bytes) -> None:
+    try:
+        with Image.open(BytesIO(payload)) as image:
+            image.verify()
+    except (UnidentifiedImageError, OSError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="Texture uploads must be valid PNG, JPG, JPEG, or WebP images") from exc
+
+
+def upload_filename(upload: UploadFile | Any | None) -> str:
+    if upload is None or not hasattr(upload, "filename"):
+        return ""
+    return str(upload.filename or "")
 
 
 def write_status(job_id: str, status: dict[str, Any]) -> None:
@@ -86,6 +108,8 @@ def job_downloads(job_id: str, summary: dict[str, Any]) -> dict[str, str]:
         "attribution": file_url(job_id, str(files.get("attribution", "ATTRIBUTION.txt"))),
         "summary": file_url(job_id, "summary.json"),
     }
+    if files.get("dae"):
+        downloads["dae"] = file_url(job_id, str(files["dae"]))
     if files.get("chunks_zip"):
         downloads["chunks"] = file_url(job_id, str(files["chunks_zip"]))
     if files.get("chunks_manifest"):
@@ -206,6 +230,7 @@ def available_job_filenames(job_id: str) -> set[str]:
     filenames = {
         "city_model.3mf",
         "city_model.glb",
+        "city_model.dae",
         "city_model.stl",
         "city_model_chunks.zip",
         "chunks_manifest.json",
@@ -227,7 +252,14 @@ def available_job_filenames(job_id: str) -> set[str]:
     return filenames
 
 
-def run_job(job_id: str, params_data: dict[str, Any], dem_path: str | None) -> None:
+def run_job(
+    job_id: str,
+    params_data: dict[str, Any],
+    dem_path: str | None,
+    landmark_model_path: str | None = None,
+    texture_paths: dict[str, str | None] | None = None,
+    vector_data_path: str | None = None,
+) -> None:
     jd = job_dir(job_id)
     out = OUTPUTS_DIR / job_id
     out.mkdir(parents=True, exist_ok=True)
@@ -246,6 +278,9 @@ def run_job(job_id: str, params_data: dict[str, Any], dem_path: str | None) -> N
             params,
             out,
             dem_path=dem_path,
+            landmark_model_path=landmark_model_path,
+            vector_data_path=vector_data_path,
+            texture_paths=texture_paths,
             progress=progress,
             cancel_check=lambda: raise_if_cancelled(job_id),
         )
@@ -334,6 +369,11 @@ async def create_job(
     params: str = Form(...),
     dem_file: UploadFile | None = File(default=None),
     route_file: UploadFile | None = File(default=None),
+    landmark_model_file: UploadFile | None = File(default=None),
+    texture_ground_file: UploadFile | None = File(default=None),
+    texture_wall_file: UploadFile | None = File(default=None),
+    texture_roof_file: UploadFile | None = File(default=None),
+    vector_data_file: UploadFile | None = File(default=None),
 ) -> dict[str, Any]:
     try:
         params_data = json.loads(params)
@@ -368,14 +408,23 @@ async def create_job(
             raise HTTPException(status_code=400, detail=f"Invalid route file: {exc}") from exc
 
     try:
-        ModelParams.from_dict(params_data)
+        validated_params = ModelParams.from_dict(params_data)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Invalid params: {exc}") from exc
+    landmark_filename = upload_filename(landmark_model_file)
+    if validated_params.include_landmark_replacement and not landmark_filename:
+        raise HTTPException(status_code=400, detail="Landmark replacement needs a GLB, GLTF, OBJ, STL, or DAE model upload")
+    vector_filename = upload_filename(vector_data_file)
+    if validated_params.model_data_source == "local_vector" and not vector_filename:
+        raise HTTPException(status_code=400, detail="Local vector model data needs a GeoJSON file upload")
 
     job_id = uuid4().hex[:12]
     jd = job_dir(job_id)
     jd.mkdir(parents=True, exist_ok=True)
     dem_path: str | None = None
+    landmark_model_path: str | None = None
+    vector_data_path: str | None = None
+    texture_paths: dict[str, str | None] = {"ground": None, "wall": None, "roof": None}
     if dem_file is not None and dem_file.filename:
         suffix = Path(dem_file.filename).suffix.lower() or ".tif"
         if suffix not in {".tif", ".tiff"}:
@@ -388,8 +437,52 @@ async def create_job(
         route_path_obj = jd / f"route{route_suffix}"
         route_path_obj.write_bytes(route_bytes)
 
+    if landmark_filename:
+        suffix = Path(landmark_filename).suffix.lower()
+        if suffix not in LANDMARK_MODEL_SUFFIXES:
+            raise HTTPException(status_code=400, detail="Landmark model upload must be GLB, GLTF, OBJ, STL, or DAE")
+        payload = await landmark_model_file.read()
+        if len(payload) > LANDMARK_MODEL_MAX_BYTES:
+            raise HTTPException(status_code=400, detail="Landmark model uploads must be 120 MB or smaller")
+        landmark_path_obj = jd / f"landmark_model{suffix}"
+        landmark_path_obj.write_bytes(payload)
+        landmark_model_path = str(landmark_path_obj)
+
+    if vector_filename:
+        suffix = Path(vector_filename).suffix.lower()
+        if suffix not in VECTOR_DATA_SUFFIXES:
+            raise HTTPException(status_code=400, detail="Local vector model data must be a GeoJSON .geojson or .json file")
+        payload = await vector_data_file.read()
+        if len(payload) > VECTOR_DATA_MAX_BYTES:
+            raise HTTPException(status_code=400, detail="Local vector GeoJSON uploads must be 80 MB or smaller")
+        try:
+            json.loads(payload.decode("utf-8-sig"))
+        except (UnicodeDecodeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail="Local vector GeoJSON upload must be valid UTF-8 JSON") from exc
+        vector_path_obj = jd / f"vector_data{suffix}"
+        vector_path_obj.write_bytes(payload)
+        vector_data_path = str(vector_path_obj)
+
+    for texture_name, upload in {
+        "ground": texture_ground_file,
+        "wall": texture_wall_file,
+        "roof": texture_roof_file,
+    }.items():
+        if upload is None or not hasattr(upload, "filename") or not upload.filename:
+            continue
+        suffix = Path(upload.filename).suffix.lower()
+        if suffix not in TEXTURE_SUFFIXES:
+            raise HTTPException(status_code=400, detail="Texture uploads must be PNG, JPG, JPEG, or WebP images")
+        payload = await upload.read()
+        if len(payload) > TEXTURE_MAX_BYTES:
+            raise HTTPException(status_code=400, detail="Texture uploads must be 12 MB or smaller")
+        validate_texture_payload(payload)
+        texture_path_obj = jd / f"texture_{texture_name}{suffix}"
+        texture_path_obj.write_bytes(payload)
+        texture_paths[texture_name] = str(texture_path_obj)
+
     write_status(job_id, {"job_id": job_id, "status": "queued", "message": "Queued", "progress": 0.0})
-    submit_job(job_id, run_job, params_data, dem_path)
+    submit_job(job_id, run_job, params_data, dem_path, landmark_model_path, texture_paths, vector_data_path)
     return {"job_id": job_id, "status_url": f"/api/jobs/{job_id}"}
 
 
@@ -548,6 +641,8 @@ def get_job_file(job_id: str, filename: str):
         media_type = "text/plain"
     elif filename.endswith(".glb"):
         media_type = "model/gltf-binary"
+    elif filename.endswith(".dae"):
+        media_type = "model/vnd.collada+xml"
     elif filename.endswith(".3mf"):
         media_type = "model/3mf"
     elif filename.endswith(".stl"):

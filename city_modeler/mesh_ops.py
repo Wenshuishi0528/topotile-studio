@@ -29,6 +29,7 @@ COLORS = {
     "parking": (168, 168, 156, 255),
     "airport": (168, 168, 156, 255),
     "area_infill": (176, 164, 138, 255),
+    "landmark": (245, 245, 245, 255),
     "route": (220, 58, 48, 255),
     "rail_lines": (72, 72, 72, 255),
     "rail_stations": (214, 214, 206, 255),
@@ -2282,6 +2283,8 @@ def build_surface_layer_meshes(
     subway_line_features = subway_line_features or []
     subway_station_features = subway_station_features or []
 
+    road_area_polys = _feature_polygons(road_features)
+    road_line_polys = _buffer_feature_lines(road_features, scaler, params, "road") if road_features else []
     water_polys = _feature_polygons(water_features) + _buffer_feature_lines(water_features, scaler, params, "water")
     green_polys = _feature_polygons(green_features)
     parking_polys = _feature_polygons(parking_features)
@@ -2290,7 +2293,7 @@ def build_surface_layer_meshes(
     building_polys = _feature_polygons(building_features)
 
     water_union = unary_union(water_polys) if water_polys else None
-    road_cutout_union = unary_union(_buffer_feature_lines(road_features, scaler, params, "road")) if road_features else None
+    road_cutout_union = unary_union(road_area_polys + road_line_polys) if (road_area_polys or road_line_polys) else None
     green_union = unary_union(green_polys) if green_polys else None
     parking_union = unary_union(parking_polys) if parking_polys else None
     airport_union = unary_union(airport_polys) if airport_polys else None
@@ -2370,6 +2373,18 @@ def build_surface_layer_meshes(
     if params.include_water and not params.cut_out_water:
         parts.append(make_layer_mesh("water", list(iter_polygons(water_union)) if water_union else [], scaler, terrain, params, thickness_mm=0.35, z_offset_mm=0.08, color=COLORS["water"], simplify_tolerance_mm=surface_tol_mm))
     if params.include_roads:
+        if road_area_polys:
+            parts.append(make_layer_mesh(
+                "roads",
+                road_area_polys,
+                scaler,
+                terrain,
+                params,
+                thickness_mm=0.50,
+                z_offset_mm=0.12,
+                color=COLORS["roads"],
+                simplify_tolerance_mm=surface_tol_mm,
+            ))
         parts.append(build_road_meshes(road_features, scaler, terrain, params, water_union if params.cut_out_water else None))
     rail_water_union = water_union if params.cut_out_water else None
     if params.include_rail_lines:

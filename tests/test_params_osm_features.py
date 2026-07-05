@@ -75,6 +75,52 @@ def test_model_params_accepts_high_detail_mode():
     assert params.model_detail_mode == "high"
 
 
+def test_model_params_accepts_local_vector_model_data_source():
+    params = ModelParams.from_dict({
+        "bbox": [39.90, 116.38, 39.91, 116.39],
+        "model_data_source": "local_vector",
+        "vector_coordinate_system": "gcj02",
+        "vector_data_attribution": "Authorized test GIS data",
+    })
+
+    assert params.model_data_source == "local_vector"
+    assert params.vector_coordinate_system == "gcj02"
+    assert params.vector_data_attribution == "Authorized test GIS data"
+
+
+def test_model_params_accepts_landmark_replacement_controls():
+    params = ModelParams.from_dict({
+        "bbox": [47.62, -122.355, 47.626, -122.3455],
+        "include_landmark_replacement": "true",
+        "landmark_osm_id": " way/123456 ",
+        "landmark_scale": "1.25",
+        "landmark_rotation_deg": "45",
+        "landmark_z_offset_mm": "0.4",
+        "landmark_fit_to_footprint": "false",
+        "landmark_replace_original": "false",
+    })
+
+    assert params.include_landmark_replacement is True
+    assert params.landmark_osm_id == "way/123456"
+    assert params.landmark_scale == 1.25
+    assert params.landmark_rotation_deg == 45
+    assert params.landmark_z_offset_mm == 0.4
+    assert params.landmark_fit_to_footprint is False
+    assert params.landmark_replace_original is False
+
+
+def test_model_params_requires_landmark_osm_id_when_enabled():
+    try:
+        ModelParams.from_dict({
+            "bbox": [47.62, -122.355, 47.626, -122.3455],
+            "include_landmark_replacement": "true",
+        })
+    except ValueError as exc:
+        assert "target OSM ID" in str(exc)
+    else:
+        raise AssertionError("Expected landmark replacement without OSM ID to fail")
+
+
 def test_model_params_accepts_area_infill_height_and_toggle():
     params = ModelParams.from_dict({
         "bbox": [47.62, -122.355, 47.626, -122.3455],

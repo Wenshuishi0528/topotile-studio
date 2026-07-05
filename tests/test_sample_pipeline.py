@@ -15,6 +15,7 @@ def test_generate_sample(tmp_path: Path):
     assert summary["sample"]["name"] == "Offline test model"
     assert (tmp_path / files["3mf"]).exists()
     assert (tmp_path / files["glb"]).exists()
+    assert (tmp_path / files["dae"]).exists()
     assert (tmp_path / files["stl"]).exists()
     assert (tmp_path / files["project"]).exists()
     assert summary["features"]["buildings"] > 0
@@ -111,8 +112,39 @@ def test_generate_uses_custom_output_name(tmp_path: Path):
     assert summary["output_name"] == "UW_Campus"
     assert summary["files"]["3mf"] == "UW_Campus.3mf"
     assert summary["files"]["glb"] == "UW_Campus.glb"
+    assert summary["files"]["dae"] == "UW_Campus.dae"
     assert summary["files"]["stl"] == "UW_Campus.stl"
     validate_3mf(tmp_path / "UW_Campus.3mf")
+
+
+def test_generate_with_manual_landmark_replacement(tmp_path: Path):
+    import trimesh
+
+    landmark_path = tmp_path / "landmark.stl"
+    trimesh.creation.box(extents=(1.0, 1.0, 2.0)).export(landmark_path)
+    params = ModelParams(
+        south=47.6200,
+        west=-122.3550,
+        north=47.6260,
+        east=-122.3455,
+        max_size_mm=160,
+        terrain_grid_size=18,
+        include_landmark_replacement=True,
+        landmark_osm_id="way/300",
+        landmark_scale=1.0,
+    )
+    osm_json = make_synthetic_osm_json(params.south, params.west, params.north, params.east)
+
+    summary = generate_model(params, tmp_path, landmark_model_path=landmark_path, osm_json_override=osm_json)
+
+    assert summary["landmark_replacement"]["enabled"] is True
+    assert summary["landmark_replacement"]["status"] == "complete"
+    assert summary["landmark_replacement"]["matched_osm_id"] == "way/300"
+    assert summary["landmark_replacement"]["removed_buildings"] >= 1
+    assert summary["features"]["landmarks"] == 1
+    assert summary["features"]["buildings"] == summary["features"]["osm_buildings"] - summary["landmark_replacement"]["removed_buildings"]
+    assert "landmark" in {part["name"] for part in summary["mesh_parts"]}
+    assert (tmp_path / "city_model.3mf").exists()
 
 
 def test_generate_with_saved_route_segments(tmp_path: Path):
