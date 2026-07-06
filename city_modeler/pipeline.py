@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import asdict
 from pathlib import Path
 import json
@@ -68,6 +69,10 @@ PRINT_EXPORT_COLORS: dict[str, tuple[int, int, int, int]] = {
     "rail_stations": (245, 245, 245, 255),
     "subway_lines": (170, 55, 170, 255),
     "subway_stations": (245, 245, 245, 255),
+    "power_lines": (150, 105, 42, 255),
+    "minor_power_lines": (184, 134, 62, 255),
+    "power_towers": (245, 245, 245, 255),
+    "power_plants": (245, 245, 245, 255),
 }
 
 
@@ -199,6 +204,120 @@ def clip_features_to_footprint(features: list[OSMFeature], footprint_m: BaseGeom
             continue
         clipped.append(OSMFeature(layer=feature.layer, geometry_m=geom, tags=feature.tags, osm_id=feature.osm_id))
     return clipped
+
+
+def _feature_count_summary(params: ModelParams, features: list[OSMFeature]) -> dict[str, Any]:
+    raw = Counter(feature.layer for feature in features)
+    selected_road_levels = set(params.road_levels)
+    selected_roads = sum(
+        1 for feature in features
+        if feature.layer == "road" and feature.tags.get("highway") in selected_road_levels
+    )
+    return {
+        "raw": dict(sorted(raw.items())),
+        "selected": {
+            "buildings": raw.get("building", 0) if params.include_buildings else 0,
+            "roads": selected_roads if params.include_roads else 0,
+            "road_candidates": raw.get("road", 0),
+            "water": raw.get("water", 0) if params.include_water or params.cut_out_water else 0,
+            "green": raw.get("green", 0) if params.include_green else 0,
+            "parking": raw.get("parking", 0) if params.include_parking else 0,
+            "airport": raw.get("airport", 0) if params.include_airport else 0,
+            "area_infill": raw.get("area_infill", 0) if params.include_area_infill else 0,
+            "rail_lines": raw.get("rail_line", 0) if params.include_rail_lines else 0,
+            "rail_stations": raw.get("rail_station", 0) if params.include_rail_stations else 0,
+            "subway_lines": raw.get("subway_line", 0) if params.include_subway_lines else 0,
+            "subway_stations": raw.get("subway_station", 0) if params.include_subway_stations else 0,
+            "power_lines": raw.get("power_line", 0) if params.include_power_lines else 0,
+            "minor_power_lines": raw.get("minor_power_line", 0) if params.include_minor_power_lines else 0,
+            "power_towers": raw.get("power_tower", 0) if params.include_power_towers else 0,
+            "power_plants": raw.get("power_plant", 0) if params.include_power_plants else 0,
+        },
+        "selected_road_levels": params.road_levels,
+    }
+
+
+def preview_feature_statistics(
+    params: ModelParams,
+    vector_data_path: str | Path | None = None,
+    osm_json_path: str | Path | None = None,
+    osm_json_override: dict[str, Any] | None = None,
+    cancel_check: CancelCheck | None = None,
+) -> dict[str, Any]:
+    check_cancel(cancel_check)
+    projection = make_local_projection(params.south, params.west, params.north, params.east)
+    footprint_m = footprint_polygon_m(params, projection.width_m, projection.height_m)
+    clip_m: BaseGeometry = footprint_m if footprint_m is not None else rectangle_polygon_m(projection.width_m, projection.height_m)
+    vector_data_summary: dict[str, Any] | None = None
+    osm_json: dict[str, Any] = {}
+    source = params.model_data_source
+
+    if params.model_data_source == "local_vector":
+        if vector_data_path is None:
+            raise ValueError("Local vector model data needs a GeoJSON file before preview.")
+        features, vector_data_summary = load_vector_features(
+            vector_data_path,
+            projection,
+            coordinate_system=params.vector_coordinate_system,
+        )
+    else:
+        if osm_json_override is not None:
+            osm_json = osm_json_override
+        elif osm_json_path:
+            with open(osm_json_path, "r", encoding="utf-8") as f:
+                osm_json = json.load(f)
+        elif params.large_map_mode:
+            osm_json = fetch_osm_json_tiled(
+                params.south,
+                params.west,
+                params.north,
+                params.east,
+                params.osm_overpass_url,
+                tile_size_km=params.osm_tile_size_km,
+                progress=None,
+                cancel_check=cancel_check,
+            )
+        else:
+            osm_json = fetch_osm_json(
+                params.south,
+                params.west,
+                params.north,
+                params.east,
+                params.osm_overpass_url,
+                cancel_check=cancel_check,
+            )
+        check_cancel(cancel_check)
+        if should_fetch_supplemental_water(params, projection.width_m, projection.height_m):
+            try:
+                supplemental_water = fetch_water_osm_json(
+                    params.south,
+                    params.west,
+                    params.north,
+                    params.east,
+                    params.osm_overpass_url,
+                    cancel_check=cancel_check,
+                )
+                osm_json = merge_osm_json(osm_json, supplemental_water)
+            except OverpassFetchError:
+                pass
+        features = parse_osm_features(osm_json, projection)
+
+    features = clip_features_to_footprint(features, clip_m)
+    counts = _feature_count_summary(params, features)
+    return {
+        "bbox": params.bbox_tuple,
+        "area_width_m": projection.width_m,
+        "area_height_m": projection.height_m,
+        "area_km2": projection.width_m * projection.height_m / 1_000_000.0,
+        "model_data_source": {
+            "source": source,
+            "vector_coordinate_system": params.vector_coordinate_system,
+            "local_vector": vector_data_summary,
+        },
+        "osm_tile_count": osm_json.get("tile_count"),
+        "osm_tile_errors": osm_json.get("tile_errors"),
+        "features": counts,
+    }
 
 
 def should_fetch_overture_buildings(params: ModelParams, osm_json: dict[str, Any], osm_json_override: dict[str, Any] | None) -> bool:
@@ -455,6 +574,10 @@ def generate_model(
     rail_stations = [f for f in features if f.layer == "rail_station"]
     subway_lines = [f for f in features if f.layer == "subway_line"]
     subway_stations = [f for f in features if f.layer == "subway_station"]
+    power_lines = [f for f in features if f.layer == "power_line"]
+    minor_power_lines = [f for f in features if f.layer == "minor_power_line"]
+    power_towers = [f for f in features if f.layer == "power_tower"]
+    power_plants = [f for f in features if f.layer == "power_plant"]
     route_configs = params.routes
     if params.include_route and not route_configs:
         route_configs = normalize_route_configs(
@@ -501,7 +624,7 @@ def generate_model(
         check_cancel(cancel_check)
         parts.append(landmark_result.part)
 
-    _progress(progress, "Building roads, water, green, parking, airport, rail, subway, and area infill layers", 0.70)
+    _progress(progress, "Building roads, water, green, parking, airport, rail, subway, power, and area infill layers", 0.70)
     check_cancel(cancel_check)
     parts.extend(build_surface_layer_meshes(
         roads,
@@ -518,6 +641,10 @@ def generate_model(
         rail_station_features=rail_stations,
         subway_line_features=subway_lines,
         subway_station_features=subway_stations,
+        power_line_features=power_lines,
+        minor_power_line_features=minor_power_lines,
+        power_tower_features=power_towers,
+        power_plant_features=power_plants,
     ))
     if params.include_route:
         _progress(progress, f"Building route track layer from {route_point_total} points", 0.76)
@@ -642,6 +769,10 @@ def generate_model(
             "rail_stations": len(rail_stations),
             "subway_lines": len(subway_lines),
             "subway_stations": len(subway_stations),
+            "power_lines": len(power_lines),
+            "minor_power_lines": len(minor_power_lines),
+            "power_towers": len(power_towers),
+            "power_plants": len(power_plants),
             "route_points": route_point_total,
         },
         "route": {
@@ -869,6 +1000,10 @@ def generate_sample(output_dir: str | Path, cancel_check: CancelCheck | None = N
             "rail_stations": 1 if "rail_stations" in feature_names else 0,
             "subway_lines": 1 if "subway_lines" in feature_names else 0,
             "subway_stations": 1 if "subway_stations" in feature_names else 0,
+            "power_lines": 1 if "power_lines" in feature_names else 0,
+            "minor_power_lines": 1 if "minor_power_lines" in feature_names else 0,
+            "power_towers": 1 if "power_towers" in feature_names else 0,
+            "power_plants": 1 if "power_plants" in feature_names else 0,
             "route_points": 0,
             "bundled_sample_objects": len(parts),
         },

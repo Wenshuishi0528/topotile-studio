@@ -31,6 +31,10 @@ def test_print_color_groups_apply_stable_3mf_layer_colors():
     rail_stations = _part("rail_stations", (214, 214, 206, 255))
     subway_lines = _part("subway_lines", (170, 55, 170, 255))
     subway_stations = _part("subway_stations", (205, 180, 230, 255))
+    power_lines = _part("power_lines", (150, 105, 42, 255))
+    minor_power_lines = _part("minor_power_lines", (184, 134, 62, 255))
+    power_towers = _part("power_towers", (230, 215, 168, 255))
+    power_plants = _part("power_plants", (194, 176, 132, 255))
 
     export_parts, summary = export_parts_with_print_color_groups(
         [
@@ -45,6 +49,10 @@ def test_print_color_groups_apply_stable_3mf_layer_colors():
             rail_stations,
             subway_lines,
             subway_stations,
+            power_lines,
+            minor_power_lines,
+            power_towers,
+            power_plants,
         ],
         params,
     )
@@ -63,6 +71,10 @@ def test_print_color_groups_apply_stable_3mf_layer_colors():
     assert export_parts[8].color == (245, 245, 245, 255)
     assert export_parts[9].color == (170, 55, 170, 255)
     assert export_parts[10].color == (245, 245, 245, 255)
+    assert export_parts[11].color == (150, 105, 42, 255)
+    assert export_parts[12].color == (184, 134, 62, 255)
+    assert export_parts[13].color == (245, 245, 245, 255)
+    assert export_parts[14].color == (245, 245, 245, 255)
     assert export_parts[1].vertices is buildings.vertices
     assert {item["name"] for item in summary["parts"]} == {
         "buildings",
@@ -75,6 +87,10 @@ def test_print_color_groups_apply_stable_3mf_layer_colors():
         "rail_stations",
         "subway_lines",
         "subway_stations",
+        "power_lines",
+        "minor_power_lines",
+        "power_towers",
+        "power_plants",
     }
 
 

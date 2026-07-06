@@ -146,6 +146,74 @@ def test_rail_and_subway_layers_generate_optional_parts():
     assert not by_name["subway_stations"].is_empty()
 
 
+def test_power_layers_generate_optional_parts():
+    params = ModelParams(
+        south=0.0,
+        west=0.0,
+        north=0.01,
+        east=0.01,
+        include_power_line_layers=True,
+        include_power_lines=True,
+        include_minor_power_lines=True,
+        include_power_towers=True,
+        include_power_plants=True,
+    )
+    scaler = ModelScaler(scale_mm_per_m=1.0, width_mm=80.0, height_mm=80.0)
+    terrain = TerrainGrid(
+        x_mm=np.asarray([[0.0, 80.0], [0.0, 80.0]]),
+        y_mm=np.asarray([[0.0, 0.0], [80.0, 80.0]]),
+        z_mm=np.full((2, 2), 3.0),
+    )
+    power_line = OSMFeature(
+        layer="power_line",
+        geometry_m=LineString([(10.0, 20.0), (70.0, 20.0)]),
+        tags={"power": "line"},
+        osm_id="way/power-line",
+    )
+    minor_line = OSMFeature(
+        layer="minor_power_line",
+        geometry_m=LineString([(10.0, 30.0), (70.0, 30.0)]),
+        tags={"power": "minor_line"},
+        osm_id="way/minor-line",
+    )
+    tower = OSMFeature(
+        layer="power_tower",
+        geometry_m=Point(40.0, 20.0),
+        tags={"power": "tower"},
+        osm_id="node/tower",
+    )
+    plant = OSMFeature(
+        layer="power_plant",
+        geometry_m=Polygon([(20.0, 40.0), (50.0, 40.0), (50.0, 60.0), (20.0, 60.0), (20.0, 40.0)]),
+        tags={"power": "plant"},
+        osm_id="way/plant",
+    )
+
+    parts = build_surface_layer_meshes(
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        scaler,
+        terrain,
+        params,
+        power_line_features=[power_line],
+        minor_power_line_features=[minor_line],
+        power_tower_features=[tower],
+        power_plant_features=[plant],
+    )
+    by_name = {part.name: part for part in parts}
+
+    assert {"power_lines", "minor_power_lines", "power_towers", "power_plants"} <= set(by_name)
+    assert not by_name["power_lines"].is_empty()
+    assert not by_name["minor_power_lines"].is_empty()
+    assert not by_name["power_towers"].is_empty()
+    assert not by_name["power_plants"].is_empty()
+
+
 def test_green_surface_follows_terrain_relief():
     params = ModelParams(south=0.0, west=0.0, north=0.01, east=0.01)
     scaler = ModelScaler(scale_mm_per_m=1.0, width_mm=40.0, height_mm=40.0)

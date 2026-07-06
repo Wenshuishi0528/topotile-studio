@@ -62,6 +62,10 @@ def test_overpass_query_includes_building_parts_and_green_relations():
     assert 'node["railway"~"station|halt|subway_entrance|tram_stop"]' in query
     assert 'way["public_transport"="station"]' in query
     assert 'node["station"~"subway|train|rail|light_rail"]' in query
+    assert 'way["power"~"line|minor_line"]' in query
+    assert 'node["power"~"tower|pole"]' in query
+    assert 'way["power"~"plant"]' in query
+    assert 'relation["power"~"plant"]' in query
     assert 'way["amenity"="parking"]' in query
     assert 'relation["amenity"="parking"]' in query
     assert 'way["aeroway"~"runway|taxiway|apron"]' in query

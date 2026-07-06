@@ -57,6 +57,31 @@ def test_model_params_rail_and_subway_layers_default_off_and_can_enable():
     assert enabled.include_subway_stations is True
 
 
+def test_model_params_power_layers_parent_defaults_off_and_can_enable():
+    params = ModelParams.from_dict({"bbox": [47.62, -122.355, 47.626, -122.3455]})
+
+    assert params.include_power_line_layers is False
+    assert params.include_power_lines is False
+    assert params.include_minor_power_lines is False
+    assert params.include_power_towers is False
+    assert params.include_power_plants is False
+
+    enabled = ModelParams.from_dict({
+        "bbox": [47.62, -122.355, 47.626, -122.3455],
+        "include_power_line_layers": "true",
+        "include_power_lines": "true",
+        "include_minor_power_lines": "true",
+        "include_power_towers": "true",
+        "include_power_plants": "true",
+    })
+
+    assert enabled.include_power_line_layers is True
+    assert enabled.include_power_lines is True
+    assert enabled.include_minor_power_lines is True
+    assert enabled.include_power_towers is True
+    assert enabled.include_power_plants is True
+
+
 def test_model_params_area_infill_defaults_on_with_06mm_height():
     params = ModelParams.from_dict({"bbox": [47.62, -122.355, 47.626, -122.3455]})
 
@@ -673,3 +698,49 @@ def test_parse_rail_and_subway_lines_and_stations():
     assert {feature.layer for feature in features} == {"rail_line", "subway_line", "rail_station", "subway_station"}
     assert {feature.osm_id for feature in features if feature.layer == "rail_station"} == {"node/12"}
     assert {feature.osm_id for feature in features if feature.layer == "subway_station"} == {"node/13"}
+
+
+def test_parse_power_lines_towers_and_plants():
+    projection = make_local_projection(47.0, -122.0, 47.01, -121.99)
+    osm_json = {
+        "elements": [
+            {
+                "type": "way",
+                "id": 20,
+                "tags": {"power": "line"},
+                "geometry": [{"lon": -121.999, "lat": 47.001}, {"lon": -121.991, "lat": 47.001}],
+            },
+            {
+                "type": "way",
+                "id": 21,
+                "tags": {"power": "minor_line"},
+                "geometry": [{"lon": -121.999, "lat": 47.002}, {"lon": -121.991, "lat": 47.002}],
+            },
+            {
+                "type": "node",
+                "id": 22,
+                "tags": {"power": "tower"},
+                "lon": -121.995,
+                "lat": 47.003,
+            },
+            {
+                "type": "way",
+                "id": 23,
+                "tags": {"power": "plant"},
+                "geometry": [
+                    {"lon": -121.998, "lat": 47.004},
+                    {"lon": -121.996, "lat": 47.004},
+                    {"lon": -121.996, "lat": 47.006},
+                    {"lon": -121.998, "lat": 47.006},
+                    {"lon": -121.998, "lat": 47.004},
+                ],
+            },
+        ]
+    }
+
+    features = parse_osm_features(osm_json, projection)
+
+    assert {feature.layer for feature in features} == {
+        "power_line", "minor_power_line", "power_tower", "power_plant"
+    }
+    assert {feature.osm_id for feature in features if feature.layer == "power_tower"} == {"node/22"}

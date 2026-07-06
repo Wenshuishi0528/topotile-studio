@@ -10,6 +10,7 @@ from urllib.parse import quote
 from uuid import uuid4
 import json
 import shutil
+import tempfile
 import traceback
 from typing import Any
 
@@ -18,10 +19,11 @@ from fastapi import Body, FastAPI, UploadFile, File, Form, HTTPException, Query
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image, UnidentifiedImageError
+from starlette.concurrency import run_in_threadpool
 
 from city_modeler.cancel import GenerationCancelled
 from city_modeler.params import ModelParams
-from city_modeler.pipeline import generate_model, generate_sample
+from city_modeler.pipeline import generate_model, generate_sample, preview_feature_statistics
 from city_modeler.routes import parse_route_text
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -484,6 +486,52 @@ async def create_job(
     write_status(job_id, {"job_id": job_id, "status": "queued", "message": "Queued", "progress": 0.0})
     submit_job(job_id, run_job, params_data, dem_path, landmark_model_path, texture_paths, vector_data_path)
     return {"job_id": job_id, "status_url": f"/api/jobs/{job_id}"}
+
+
+@app.post("/api/feature-preview")
+async def feature_preview(
+    params: str = Form(...),
+    vector_data_file: UploadFile | None = File(default=None),
+) -> dict[str, Any]:
+    try:
+        params_data = json.loads(params)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid params JSON: {exc}") from exc
+    try:
+        validated_params = ModelParams.from_dict(params_data)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid params: {exc}") from exc
+
+    temp_path: Path | None = None
+    vector_filename = upload_filename(vector_data_file)
+    try:
+        if validated_params.model_data_source == "local_vector":
+            if not vector_filename:
+                raise HTTPException(status_code=400, detail="Local vector preview needs a GeoJSON file upload")
+            suffix = Path(vector_filename).suffix.lower()
+            if suffix not in VECTOR_DATA_SUFFIXES:
+                raise HTTPException(status_code=400, detail="Local vector model data must be a GeoJSON .geojson or .json file")
+            payload = await vector_data_file.read()
+            if len(payload) > VECTOR_DATA_MAX_BYTES:
+                raise HTTPException(status_code=400, detail="Local vector GeoJSON uploads must be 80 MB or smaller")
+            try:
+                json.loads(payload.decode("utf-8-sig"))
+            except (UnicodeDecodeError, ValueError) as exc:
+                raise HTTPException(status_code=400, detail="Local vector GeoJSON upload must be valid UTF-8 JSON") from exc
+            with tempfile.NamedTemporaryFile("wb", suffix=suffix, delete=False) as tmp:
+                tmp.write(payload)
+                temp_path = Path(tmp.name)
+        return await run_in_threadpool(preview_feature_statistics, validated_params, temp_path)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Feature preview failed: {exc}") from exc
+    finally:
+        if temp_path is not None:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 @app.post("/api/sample")

@@ -177,7 +177,7 @@
 </head>
 <body>
 <header>
-  <h1>TopoTile Studio / 3D地图工坊 <span class="app-version" id="appVersionLabel">v0.65</span></h1>
+  <h1>TopoTile Studio / 3D地图工坊 <span class="app-version" id="appVersionLabel">v0.66</span></h1>
   <div class="header-actions">
     <div class="author-name">Made by Wenshuishi</div>
     <div class="language-switch" aria-label="Language">
@@ -236,7 +236,7 @@
         </select>
         <label>Vector data attribution</label>
         <textarea id="vector_data_attribution" rows="2" placeholder="Example: Authorized city GIS data, 2026"></textarea>
-        <div class="small">GeoJSON can replace OSM model data for buildings, roads, water, green, parking, airport, rail, subway, and area infill. Use only data you are licensed to export.</div>
+        <div class="small">GeoJSON can replace OSM model data for buildings, roads, water, green, parking, airport, rail, subway, power, and area infill. Use only data you are licensed to export.</div>
       </div>
     </div>
 
@@ -321,6 +321,7 @@
       <label class="check"><input id="include_parking" type="checkbox" checked> Parking</label>
       <label class="check"><input id="include_airport" type="checkbox" checked> Airport</label>
       <label class="check"><input id="include_area_infill" type="checkbox" checked> Area infill</label>
+      <label class="check"><input id="include_power_plants" type="checkbox"> Power plants</label>
       <label class="check"><input id="include_rail_stations" type="checkbox"> Rail stations</label>
       <label class="check"><input id="include_subway_stations" type="checkbox"> Subway stations</label>
     </div>
@@ -364,6 +365,23 @@
       <label class="check"><input id="include_subway_lines" type="checkbox"> Subway lines</label>
     </div>
     <div class="small">Leave small footpaths/service roads off for a cleaner printable street grid. Rail and subway lines are optional and off by default.</div>
+
+    <label>Power lines</label>
+    <div class="checks">
+      <label class="check"><input id="include_power_line_layers" type="checkbox"> Enable power line layers</label>
+    </div>
+    <div class="conditional-section hidden" id="powerLineAdvanced">
+      <div class="checks">
+        <label class="check"><input id="include_power_lines" type="checkbox" checked> Power line</label>
+        <label class="check"><input id="include_minor_power_lines" type="checkbox" checked> Minor power line</label>
+        <label class="check"><input id="include_power_towers" type="checkbox" checked> Power towers / poles</label>
+      </div>
+      <div class="small">Power lines are generated as low raised lines on the terrain, not suspended wires.</div>
+    </div>
+
+    <label>Feature statistics</label>
+    <button class="secondary" id="previewFeatureStats" type="button">Preview feature stats</button>
+    <div class="small" id="featureStatsStatus">Preview counts for the current selection before generating.</div>
 
     <label>Route / Track</label>
     <div class="checks">
@@ -485,7 +503,7 @@
   </section>
 </main>
 <script>
-  const APP_VERSION = '0.65';
+  const APP_VERSION = '0.66';
   document.getElementById('appVersionLabel').textContent = `v${APP_VERSION}`;
 
   const LANGUAGE_STORAGE_KEY = 'topotile.language';
@@ -516,7 +534,7 @@
     'Vector coordinate system': '矢量坐标系',
     'Vector data attribution': '矢量数据署名',
     'Example: Authorized city GIS data, 2026': '例如：某城市授权 GIS 数据，2026',
-    'GeoJSON can replace OSM model data for buildings, roads, water, green, parking, airport, rail, subway, and area infill. Use only data you are licensed to export.': 'GeoJSON 可以替换建筑、道路、水体、绿地、停车场、机场、铁路、地铁和区域补面的 OSM 模型数据。请只使用你有权导出的数据。',
+    'GeoJSON can replace OSM model data for buildings, roads, water, green, parking, airport, rail, subway, power, and area infill. Use only data you are licensed to export.': 'GeoJSON 可以替换建筑、道路、水体、绿地、停车场、机场、铁路、地铁、电力和区域补面的 OSM 模型数据。请只使用你有权导出的数据。',
     'Model data source: {source}': '模型数据源：{source}',
     'Local vector data: {features} features, skipped {skipped}': '本地矢量数据：{features} 个要素，跳过 {skipped} 个',
     'Using OpenStreetMap international map source.': '正在使用 OpenStreetMap 国外地图源。',
@@ -594,6 +612,7 @@
     'Parking': '停车场',
     'Airport': '机场',
     'Area infill': '区域补面',
+    'Power plants': '发电厂',
     'Rail lines': '铁路线',
     'Rail stations': '铁路站',
     'Subway lines': '地铁线',
@@ -623,6 +642,19 @@
     'Track': '土路/轨迹路',
     'Steps': '台阶',
     'Leave small footpaths/service roads off for a cleaner printable street grid. Rail and subway lines are optional and off by default.': '关闭较小的步道/服务道路，可以得到更干净、更适合打印的街道网格。铁路线和地铁线是可选项，默认关闭。',
+    'Power lines': '电力线路',
+    'Enable power line layers': '启用电力线路图层',
+    'Power line': '高压线 / 输电线',
+    'Minor power line': '小型电力线',
+    'Power towers / poles': '电塔 / 电杆',
+    'Power lines are generated as low raised lines on the terrain, not suspended wires.': '电力线路会按贴地低矮凸起线生成，不做悬空电线。',
+    'Feature statistics': '要素统计',
+    'Preview feature stats': '预览要素统计',
+    'Preview counts for the current selection before generating.': '生成前预览当前选择范围内的要素数量。',
+    'Loading feature stats...': '正在读取要素统计...',
+    'Feature stats failed': '要素统计失败',
+    'Feature stats failed: {message}': '要素统计失败：{message}',
+    'Feature stats: {items}': '要素统计：{items}',
     'Route / Track': '路线 / 轨迹',
     'Raised route line': '凸起路线',
     'Raised route #{number}': '凸起路线 #{number}',
@@ -777,6 +809,7 @@
     'Loading OpenStreetMap data': '正在加载 OpenStreetMap 数据',
     'Loading supplemental water boundaries': '正在补充加载水体边界',
     'Parsing OSM features': '正在解析 OSM 要素',
+    'Building roads, water, green, parking, airport, rail, subway, power, and area infill layers': '正在生成道路、水体、绿地、停车场、机场、铁路、地铁、电力和区域补面图层',
     'Repairing mesh geometry': '正在修复网格几何',
     'Writing 3MF and GLB files': '正在写入 3MF 和 GLB 文件',
     'Model is very close to the Bambu A1 build-plate limit.': '模型非常接近 Bambu A1 打印平台尺寸上限。',
@@ -2319,12 +2352,15 @@
     if (p.export_print_color_groups === undefined && p.random_export_colors !== undefined) {
       p.export_print_color_groups = p.random_export_colors;
     }
-    const boolIds = ['large_map_mode','auto_terrain','include_buildings','include_roads','include_water','cut_out_water','include_green','include_parking','include_airport','include_area_infill','include_rail_lines','include_rail_stations','include_subway_lines','include_subway_stations','include_landmark_replacement','landmark_fit_to_footprint','landmark_replace_original','include_route','chunk_export','auto_repair_mesh','export_print_color_groups','enable_render_textures'];
+    const boolIds = ['large_map_mode','auto_terrain','include_buildings','include_roads','include_water','cut_out_water','include_green','include_parking','include_airport','include_area_infill','include_power_plants','include_rail_lines','include_rail_stations','include_subway_lines','include_subway_stations','include_power_line_layers','include_power_lines','include_minor_power_lines','include_power_towers','include_landmark_replacement','landmark_fit_to_footprint','landmark_replace_original','include_route','chunk_export','auto_repair_mesh','export_print_color_groups','enable_render_textures'];
     boolIds.forEach(id => {
       if (p[id] !== undefined && document.getElementById(id)) document.getElementById(id).checked = Boolean(p[id]);
     });
     if (p.include_airport === undefined) document.getElementById('include_airport').checked = true;
     if (p.include_area_infill === undefined) document.getElementById('include_area_infill').checked = true;
+    if (p.include_power_line_layers === undefined && (p.include_power_lines || p.include_minor_power_lines || p.include_power_towers)) {
+      document.getElementById('include_power_line_layers').checked = true;
+    }
     if (p.auto_repair_mesh === undefined) document.getElementById('auto_repair_mesh').checked = true;
     if (p.export_print_color_groups === undefined) document.getElementById('export_print_color_groups').checked = true;
     const areaInfillMode = document.getElementById('area_infill_mode');
@@ -2398,6 +2434,7 @@
   document.getElementById('auto_terrain').addEventListener('change', updateTerrainModeStatus);
   document.getElementById('dem_file').addEventListener('change', updateTerrainModeStatus);
   document.getElementById('include_area_infill').addEventListener('change', updateConditionalSections);
+  document.getElementById('include_power_line_layers').addEventListener('change', updateConditionalSections);
   document.getElementById('include_landmark_replacement').addEventListener('change', updateConditionalSections);
   document.getElementById('include_route').addEventListener('change', () => {
     updateConditionalSections();
@@ -2416,6 +2453,7 @@
     const hasDem = Boolean(document.getElementById('dem_file').files[0]);
     setConditionalVisible('terrainAdvanced', auto || hasDem);
     setConditionalVisible('areaInfillAdvanced', document.getElementById('include_area_infill').checked);
+    setConditionalVisible('powerLineAdvanced', document.getElementById('include_power_line_layers').checked);
     setConditionalVisible('landmarkAdvanced', document.getElementById('include_landmark_replacement').checked);
     setConditionalVisible('routeAdvanced', document.getElementById('include_route').checked);
     setConditionalVisible('chunkAdvanced', document.getElementById('chunk_export').checked);
@@ -2472,10 +2510,15 @@
     p.include_parking = document.getElementById('include_parking').checked;
     p.include_airport = document.getElementById('include_airport').checked;
     p.include_area_infill = document.getElementById('include_area_infill').checked;
+    p.include_power_plants = document.getElementById('include_power_plants').checked;
     p.include_rail_lines = document.getElementById('include_rail_lines').checked;
     p.include_rail_stations = document.getElementById('include_rail_stations').checked;
     p.include_subway_lines = document.getElementById('include_subway_lines').checked;
     p.include_subway_stations = document.getElementById('include_subway_stations').checked;
+    p.include_power_line_layers = document.getElementById('include_power_line_layers').checked;
+    p.include_power_lines = p.include_power_line_layers && document.getElementById('include_power_lines').checked;
+    p.include_minor_power_lines = p.include_power_line_layers && document.getElementById('include_minor_power_lines').checked;
+    p.include_power_towers = p.include_power_line_layers && document.getElementById('include_power_towers').checked;
     p.include_route = document.getElementById('include_route').checked;
     p.area_infill_mode = document.getElementById('area_infill_mode').value;
     p.model_detail_mode = modelDetailMode();
@@ -2496,6 +2539,52 @@
     return p;
   }
 
+  function featureStatsText(data) {
+    const selected = ((data.features || {}).selected) || {};
+    const items = [
+      ['Buildings', selected.buildings],
+      ['Roads', selected.roads],
+      ['Water', selected.water],
+      ['Green', selected.green],
+      ['Parking', selected.parking],
+      ['Airport', selected.airport],
+      ['Area infill', selected.area_infill],
+      ['Rail lines', selected.rail_lines],
+      ['Rail stations', selected.rail_stations],
+      ['Subway lines', selected.subway_lines],
+      ['Subway stations', selected.subway_stations],
+      ['Power line', selected.power_lines],
+      ['Minor power line', selected.minor_power_lines],
+      ['Power towers / poles', selected.power_towers],
+      ['Power plants', selected.power_plants],
+    ]
+      .filter(([_label, value]) => Number.isFinite(Number(value)) && Number(value) > 0)
+      .map(([label, value]) => `${tr(label)} ${value}`);
+    if (!items.length) return tr('none');
+    return items.join(', ');
+  }
+
+  async function previewFeatureStats() {
+    const statusEl = document.getElementById('featureStatsStatus');
+    const button = document.getElementById('previewFeatureStats');
+    statusEl.textContent = tr('Loading feature stats...');
+    button.disabled = true;
+    try {
+      const form = new FormData();
+      form.append('params', JSON.stringify(params()));
+      const vectorFile = document.getElementById('vector_data_file').files[0];
+      if (vectorFile) form.append('vector_data_file', vectorFile);
+      const res = await fetch('/api/feature-preview', {method: 'POST', body: form});
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || tr('Feature stats failed'));
+      statusEl.textContent = tr('Feature stats: {items}', {items: featureStatsText(data)});
+    } catch (err) {
+      statusEl.textContent = tr('Feature stats failed: {message}', {message: err.message});
+    } finally {
+      button.disabled = Boolean(activeJobId);
+    }
+  }
+
   let activeJobId = null;
   let cancelRequested = false;
 
@@ -2504,6 +2593,7 @@
     const cancelButton = document.getElementById('cancelJob');
     document.getElementById('generate').disabled = running;
     document.getElementById('sample').disabled = running;
+    document.getElementById('previewFeatureStats').disabled = running;
     cancelButton.disabled = !running || cancelRequested;
     cancelButton.textContent = tr(cancelRequested ? 'Cancelling...' : 'Stop current job');
   }
@@ -2733,6 +2823,7 @@
     }
   });
 
+  document.getElementById('previewFeatureStats').addEventListener('click', previewFeatureStats);
 
   document.getElementById('sample').addEventListener('click', async () => {
     const statusEl = document.getElementById('status');

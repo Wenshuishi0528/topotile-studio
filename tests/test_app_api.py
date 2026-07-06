@@ -390,6 +390,47 @@ def test_create_job_saves_uploaded_local_vector_geojson(tmp_path, monkeypatch):
     assert captured["params_data"]["model_data_source"] == "local_vector"
 
 
+def test_feature_preview_counts_local_vector_power_layers():
+    payload = json.dumps({
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "properties": {"topotile_layer": "power_line"},
+                "geometry": {"type": "LineString", "coordinates": [[116.3795, 39.9000], [116.3815, 39.9000]]},
+            },
+            {
+                "type": "Feature",
+                "properties": {"topotile_layer": "power_plant"},
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [[
+                        [116.3800, 39.9010],
+                        [116.3810, 39.9010],
+                        [116.3810, 39.9018],
+                        [116.3800, 39.9018],
+                        [116.3800, 39.9010],
+                    ]],
+                },
+            },
+        ],
+    }).encode("utf-8")
+    vector_file = UploadFile(filename="power.geojson", file=BytesIO(payload))
+    params = {
+        "bbox": [39.899, 116.379, 39.902, 116.382],
+        "model_data_source": "local_vector",
+        "include_power_line_layers": True,
+        "include_power_lines": True,
+        "include_power_plants": True,
+    }
+
+    result = asyncio.run(main.feature_preview(params=json.dumps(params), vector_data_file=vector_file))
+
+    assert result["features"]["selected"]["power_lines"] == 1
+    assert result["features"]["selected"]["power_plants"] == 1
+    assert result["features"]["raw"] == {"power_line": 1, "power_plant": 1}
+
+
 def test_create_job_rejects_local_vector_without_geojson(tmp_path, monkeypatch):
     jobs = tmp_path / "jobs"
     outputs = tmp_path / "outputs"

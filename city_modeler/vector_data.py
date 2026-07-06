@@ -25,6 +25,10 @@ SUPPORTED_VECTOR_LAYERS = {
     "rail_station",
     "subway_line",
     "subway_station",
+    "power_line",
+    "minor_power_line",
+    "power_tower",
+    "power_plant",
 }
 
 DIRECT_LAYER_ALIASES = {
@@ -96,6 +100,27 @@ DIRECT_LAYER_ALIASES = {
     "subwaystation": "subway_station",
     "metrostation": "subway_station",
     "地铁站": "subway_station",
+    "power": "power_line",
+    "powerline": "power_line",
+    "electricline": "power_line",
+    "transmissionline": "power_line",
+    "高压线": "power_line",
+    "输电线": "power_line",
+    "电力线": "power_line",
+    "minorpowerline": "minor_power_line",
+    "distributionline": "minor_power_line",
+    "低压线": "minor_power_line",
+    "配电线": "minor_power_line",
+    "powertower": "power_tower",
+    "powerpole": "power_tower",
+    "tower": "power_tower",
+    "pole": "power_tower",
+    "电塔": "power_tower",
+    "电杆": "power_tower",
+    "powerplant": "power_plant",
+    "plant": "power_plant",
+    "发电厂": "power_plant",
+    "电厂": "power_plant",
 }
 
 LAYER_PROPERTY_KEYS = (
@@ -250,6 +275,14 @@ def _tags_for_layer(layer: str, props: dict[str, Any], geom: BaseGeometry) -> di
     elif layer == "subway_station":
         tags.setdefault("railway", "subway_entrance")
         tags.setdefault("station", "subway")
+    elif layer == "power_line":
+        tags.setdefault("power", "line")
+    elif layer == "minor_power_line":
+        tags.setdefault("power", "minor_line")
+    elif layer == "power_tower":
+        tags.setdefault("power", "tower")
+    elif layer == "power_plant":
+        tags.setdefault("power", "plant")
     return tags
 
 
@@ -312,9 +345,9 @@ def _safe_geom_for_layer(geom: BaseGeometry, layer: str) -> BaseGeometry | None:
         return None
     if geom.is_empty:
         return None
-    if layer in {"rail_station", "subway_station"}:
+    if layer in {"rail_station", "subway_station", "power_tower"}:
         return geom
-    if layer in {"road", "rail_line", "subway_line"}:
+    if layer in {"road", "rail_line", "subway_line", "power_line", "minor_power_line"}:
         if isinstance(geom, Point):
             return None
         return geom

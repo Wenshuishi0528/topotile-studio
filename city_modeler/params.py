@@ -227,6 +227,11 @@ class ModelParams:
     include_rail_stations: bool = False
     include_subway_lines: bool = False
     include_subway_stations: bool = False
+    include_power_line_layers: bool = False
+    include_power_lines: bool = True
+    include_minor_power_lines: bool = True
+    include_power_towers: bool = True
+    include_power_plants: bool = False
 
     osm_overpass_url: str = "https://overpass-api.de/api/interpreter"
     road_levels: list[str] = field(default_factory=lambda: list(DEFAULT_ROAD_LEVELS))
@@ -280,7 +285,9 @@ class ModelParams:
             "include_landmark_replacement", "landmark_fit_to_footprint", "landmark_replace_original",
             "include_buildings", "include_roads", "include_water", "include_green", "include_parking",
             "include_airport", "include_area_infill", "include_route",
-            "include_rail_lines", "include_rail_stations", "include_subway_lines", "include_subway_stations"
+            "include_rail_lines", "include_rail_stations", "include_subway_lines", "include_subway_stations",
+            "include_power_line_layers", "include_power_lines", "include_minor_power_lines",
+            "include_power_towers", "include_power_plants",
         }
 
         for key in numeric_fields & filtered.keys():
@@ -322,6 +329,10 @@ class ModelParams:
             )
 
         obj = cls(**filtered)
+        if not obj.include_power_line_layers:
+            obj.include_power_lines = False
+            obj.include_minor_power_lines = False
+            obj.include_power_towers = False
         obj.validate()
         return obj
 

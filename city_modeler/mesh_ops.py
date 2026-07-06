@@ -35,6 +35,10 @@ COLORS = {
     "rail_stations": (214, 214, 206, 255),
     "subway_lines": (170, 55, 170, 255),
     "subway_stations": (205, 180, 230, 255),
+    "power_lines": (150, 105, 42, 255),
+    "minor_power_lines": (184, 134, 62, 255),
+    "power_towers": (230, 215, 168, 255),
+    "power_plants": (194, 176, 132, 255),
 }
 
 MIN_PRINTABLE_HOLE_AREA_MM2 = 1e-3
@@ -2050,6 +2054,63 @@ def build_rail_meshes(
     return merge_parts(name, parts, color)
 
 
+def power_line_width_m(tags: dict[str, str]) -> float:
+    if "width" in tags:
+        value = parse_length_m(tags["width"], min_m=0.2, max_m=20.0)
+        if value is not None:
+            return value
+    return 2.0 if tags.get("power") == "line" else 1.2
+
+
+def power_line_width_mm(tags: dict[str, str], scaler: ModelScaler, min_width_mm: float) -> float:
+    return max(scaler.length_m_to_mm(power_line_width_m(tags)), min_width_mm)
+
+
+def build_power_line_meshes(
+    features: list[OSMFeature],
+    scaler: ModelScaler,
+    terrain: TerrainGrid,
+    params: ModelParams,
+    name: str,
+    color: tuple[int, int, int, int],
+    min_width_mm: float,
+    thickness_mm: float,
+    z_offset_mm: float,
+    water_union_m: BaseGeometry | None = None,
+) -> MeshPart:
+    parts: list[MeshPart] = []
+    tol_m = scaler.length_mm_to_m(max(params.simplify_tolerance_mm, 0.10))
+    for feature in features:
+        for line_m in iter_lines(feature.geometry_m):
+            if tol_m > 0:
+                line_m = line_m.simplify(tol_m, preserve_topology=False)
+            coords_m = list(line_m.coords)
+            if len(coords_m) < 2:
+                continue
+            if _terrain_has_relief(terrain):
+                max_step_m = scaler.length_mm_to_m(_terrain_spacing_mm(terrain) * 1.2)
+                coords_m = _densify_line_coords_m(coords_m, max(max_step_m, 1.0))
+            coords_mm = [scaler.xy_to_mm(float(x), float(y)) for x, y in coords_m]
+            width_mm = power_line_width_mm(feature.tags, scaler, min_width_mm)
+            for m0, m1, p0, p1 in zip(coords_m, coords_m[1:], coords_mm, coords_mm[1:]):
+                segment_m = LineString([m0, m1])
+                elevated = params.bridge_clearance_mm if (
+                    params.cut_out_water and not is_tunnel(feature.tags) and _crosses_water_cutout(segment_m, water_union_m)
+                ) else 0.0
+                parts.append(_road_segment_part(
+                    p0,
+                    p1,
+                    width_mm,
+                    terrain,
+                    thickness_mm=thickness_mm,
+                    z_offset_mm=z_offset_mm,
+                    bridge_offset_mm=elevated,
+                    name=name,
+                    color=color,
+                ))
+    return merge_parts(name, parts, color)
+
+
 def station_polygons_m(features: list[OSMFeature], scaler: ModelScaler, marker_radius_mm: float) -> list[Polygon]:
     polygons: list[Polygon] = []
     marker_radius_m = scaler.length_mm_to_m(max(marker_radius_mm, 0.30))
@@ -2276,12 +2337,20 @@ def build_surface_layer_meshes(
     rail_station_features: list[OSMFeature] | None = None,
     subway_line_features: list[OSMFeature] | None = None,
     subway_station_features: list[OSMFeature] | None = None,
+    power_line_features: list[OSMFeature] | None = None,
+    minor_power_line_features: list[OSMFeature] | None = None,
+    power_tower_features: list[OSMFeature] | None = None,
+    power_plant_features: list[OSMFeature] | None = None,
 ) -> list[MeshPart]:
     parts: list[MeshPart] = []
     rail_line_features = rail_line_features or []
     rail_station_features = rail_station_features or []
     subway_line_features = subway_line_features or []
     subway_station_features = subway_station_features or []
+    power_line_features = power_line_features or []
+    minor_power_line_features = minor_power_line_features or []
+    power_tower_features = power_tower_features or []
+    power_plant_features = power_plant_features or []
 
     road_area_polys = _feature_polygons(road_features)
     road_line_polys = _buffer_feature_lines(road_features, scaler, params, "road") if road_features else []
@@ -2291,6 +2360,7 @@ def build_surface_layer_meshes(
     airport_polys = _feature_polygons(airport_features) + _buffer_feature_lines(airport_features, scaler, params, "airport")
     area_infill_polys = _feature_polygons(area_infill_features)
     building_polys = _feature_polygons(building_features)
+    power_plant_polys = _feature_polygons(power_plant_features)
 
     water_union = unary_union(water_polys) if water_polys else None
     road_cutout_union = unary_union(road_area_polys + road_line_polys) if (road_area_polys or road_line_polys) else None
@@ -2298,9 +2368,10 @@ def build_surface_layer_meshes(
     parking_union = unary_union(parking_polys) if parking_polys else None
     airport_union = unary_union(airport_polys) if airport_polys else None
     building_union = unary_union(building_polys) if building_polys else None
+    power_plant_union = unary_union(power_plant_polys) if power_plant_polys else None
     detail_geoms = [
         geom
-        for geom in (building_union, water_union, green_union, parking_union, airport_union, road_cutout_union)
+        for geom in (building_union, water_union, green_union, parking_union, airport_union, power_plant_union, road_cutout_union)
         if geom is not None and not geom.is_empty
     ]
     detail_union = unary_union(detail_geoms) if detail_geoms else None
@@ -2322,6 +2393,14 @@ def build_surface_layer_meshes(
         if water_union and not water_union.is_empty:
             geom = geom.difference(water_union)
         cleaned_airport.extend(list(iter_polygons(geom)))
+
+    cleaned_power_plants: list[Polygon] = []
+    for pp in power_plant_polys:
+        geom: BaseGeometry = pp
+        for subtract_geom in (water_union, building_union, road_cutout_union, parking_union, airport_union):
+            if subtract_geom is not None and not subtract_geom.is_empty:
+                geom = geom.difference(subtract_geom)
+        cleaned_power_plants.extend(list(iter_polygons(geom)))
 
     # Green is deliberately lower priority than water, parking, and roads.
     cleaned_green: list[Polygon] = []
@@ -2370,6 +2449,8 @@ def build_surface_layer_meshes(
         parts.append(make_layer_mesh("parking", cleaned_parking, scaler, terrain, params, thickness_mm=0.20, z_offset_mm=0.06, color=COLORS["parking"], simplify_tolerance_mm=surface_tol_mm))
     if params.include_airport:
         parts.append(make_layer_mesh("airport", cleaned_airport, scaler, terrain, params, thickness_mm=0.20, z_offset_mm=0.06, color=COLORS["airport"], simplify_tolerance_mm=surface_tol_mm))
+    if params.include_power_plants:
+        parts.append(make_layer_mesh("power_plants", cleaned_power_plants, scaler, terrain, params, thickness_mm=0.35, z_offset_mm=0.075, color=COLORS["power_plants"], simplify_tolerance_mm=surface_tol_mm))
     if params.include_water and not params.cut_out_water:
         parts.append(make_layer_mesh("water", list(iter_polygons(water_union)) if water_union else [], scaler, terrain, params, thickness_mm=0.35, z_offset_mm=0.08, color=COLORS["water"], simplify_tolerance_mm=surface_tol_mm))
     if params.include_roads:
@@ -2435,6 +2516,45 @@ def build_surface_layer_meshes(
             thickness_mm=0.50,
             z_offset_mm=0.28,
             color=COLORS["subway_stations"],
+            simplify_tolerance_mm=surface_tol_mm,
+        ))
+    power_water_union = water_union if params.cut_out_water else None
+    if params.include_power_lines:
+        parts.append(build_power_line_meshes(
+            power_line_features,
+            scaler,
+            terrain,
+            params,
+            name="power_lines",
+            color=COLORS["power_lines"],
+            min_width_mm=0.34,
+            thickness_mm=0.30,
+            z_offset_mm=0.20,
+            water_union_m=power_water_union,
+        ))
+    if params.include_minor_power_lines:
+        parts.append(build_power_line_meshes(
+            minor_power_line_features,
+            scaler,
+            terrain,
+            params,
+            name="minor_power_lines",
+            color=COLORS["minor_power_lines"],
+            min_width_mm=0.24,
+            thickness_mm=0.24,
+            z_offset_mm=0.18,
+            water_union_m=power_water_union,
+        ))
+    if params.include_power_towers:
+        parts.append(make_layer_mesh(
+            "power_towers",
+            station_polygons_m(power_tower_features, scaler, marker_radius_mm=0.70),
+            scaler,
+            terrain,
+            params,
+            thickness_mm=0.70,
+            z_offset_mm=0.26,
+            color=COLORS["power_towers"],
             simplify_tolerance_mm=surface_tol_mm,
         ))
 

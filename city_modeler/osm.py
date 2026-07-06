@@ -39,6 +39,9 @@ AREA_INFILL_HISTORIC_RE = "district|yes|archaeological_site|monument|castle"
 AREA_INFILL_MAN_MADE_RE = "works|industrial"
 RAILWAY_LINE_RE = "rail|narrow_gauge|light_rail|tram|monorail|subway"
 RAILWAY_STATION_RE = "station|halt|subway_entrance|tram_stop"
+POWER_LINE_RE = "line|minor_line"
+POWER_SUPPORT_RE = "tower|pole"
+POWER_AREA_RE = "plant"
 
 
 class OverpassFetchError(RuntimeError):
@@ -76,6 +79,12 @@ def overpass_query(south: float, west: float, north: float, east: float, timeout
   way["station"~"subway|train|rail|light_rail"]({bbox});
   relation["station"~"subway|train|rail|light_rail"]({bbox});
   node["station"~"subway|train|rail|light_rail"]({bbox});
+  way["power"~"{POWER_LINE_RE}"]({bbox});
+  relation["power"~"{POWER_LINE_RE}"]({bbox});
+  node["power"~"{POWER_SUPPORT_RE}"]({bbox});
+  way["power"~"{POWER_SUPPORT_RE}"]({bbox});
+  way["power"~"{POWER_AREA_RE}"]({bbox});
+  relation["power"~"{POWER_AREA_RE}"]({bbox});
   way["amenity"="parking"]({bbox});
   relation["amenity"="parking"]({bbox});
   way["aeroway"~"runway|taxiway|apron"]({bbox});
@@ -470,6 +479,15 @@ def classify(tags: dict[str, Any], is_closed: bool) -> str | None:
         return "subway_line"
     if railway in {"rail", "narrow_gauge", "light_rail", "tram", "monorail"}:
         return "rail_line"
+    power = str(tags.get("power", "")).lower()
+    if power == "line":
+        return "power_line"
+    if power == "minor_line":
+        return "minor_power_line"
+    if power in {"tower", "pole"}:
+        return "power_tower"
+    if is_closed and power == "plant":
+        return "power_plant"
     highway = tags.get("highway")
     if highway:
         return "road"
@@ -587,7 +605,10 @@ def _closed_way_should_be_polygon(layer: str, tags: dict[str, str], is_closed: b
     if not is_closed:
         return False
     if layer != "water":
-        return layer in {"building", "green", "parking", "airport", "area_infill", "rail_station", "subway_station"}
+        return layer in {
+            "building", "green", "parking", "airport", "area_infill",
+            "rail_station", "subway_station", "power_plant",
+        }
     if str(tags.get("area", "")).lower() == "yes":
         return True
     if tags.get("waterway") == "riverbank":
@@ -842,7 +863,10 @@ def parse_osm_features(osm_json: dict[str, Any], projection: LocalProjection) ->
         tags = {str(k): str(v) for k, v in (element.get("tags") or {}).items()}
         if element_type == "relation":
             layer = classify(tags, is_closed=True)
-            if layer in {"green", "building", "parking", "airport", "area_infill", "rail_station", "subway_station"} or (
+            if layer in {
+                "green", "building", "parking", "airport", "area_infill",
+                "rail_station", "subway_station", "power_plant",
+            } or (
                 layer == "water" and _closed_way_should_be_polygon("water", tags, is_closed=True)
             ):
                 for poly in _polygons_from_relation(element, projection, clip, way_geometries):
@@ -851,7 +875,7 @@ def parse_osm_features(osm_json: dict[str, Any], projection: LocalProjection) ->
 
         if element_type == "node":
             layer = classify(tags, is_closed=False)
-            if layer not in {"rail_station", "subway_station"}:
+            if layer not in {"rail_station", "subway_station", "power_tower"}:
                 continue
             try:
                 point = Point(*projection.lonlat_to_local(float(element["lon"]), float(element["lat"])))

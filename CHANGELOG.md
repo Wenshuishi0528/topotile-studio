@@ -4,6 +4,18 @@ All notable changes to TopoTile Studio / 3D地图工坊 are recorded here.
 
 Time zone: local macOS time. Some early entries are reconstructed from request order, screenshots, backup names, and file modification times.
 
+## 2026-07-06
+
+### 12:50 - Power Layers and Feature Statistics Preview
+
+- Added default-off power plant generation as a low surface layer.
+- Added a default-off parent `Power lines` control that reveals `Power line`, `Minor power line`, and `Power towers / poles` sub-options only when enabled.
+- Added OSM and local GeoJSON parsing for power lines, minor power lines, towers/poles, and power plants.
+- Generated power lines as terrain-following raised printable lines, not suspended wires.
+- Added a `Feature statistics` preview API and UI button for checking selected feature counts before generating a model.
+- Added print color grouping, summaries, and regression tests for the new power layers and preview endpoint.
+- Updated the app version to `v0.66`.
+
 ## 2026-07-04
 
 ### 18:49 - China Local Vector Model Data Source
